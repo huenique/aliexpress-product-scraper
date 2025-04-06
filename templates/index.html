@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AliExpress Scraper</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+</head>
+<body class="container mt-4">
+
+    <h1>AliExpress Product Scraper</h1>
+
+    <form id="scrape-form" class="mb-4">
+
+        <!-- Card for Main Inputs -->
+        <div class="card mb-4">
+            <div class="card-header">Scraping Parameters</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="keyword" class="form-label">Search Keyword:</label>
+                    <input type="text" class="form-control" id="keyword" name="keyword" required>
+        </div>
+
+                <div class="mb-3">
+                    <label for="pages" class="form-label">Number of Pages (1-60):</label>
+                    <input type="number" class="form-control" id="pages" name="pages" min="1" max="60" value="1" required>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card for Filters -->
+        <div class="card mb-4">
+            <div class="card-header">Filters (Optional)</div>
+            <div class="card-body">
+                <div class="mb-3 row">
+                    <div class="col">
+                        <label for="min_price" class="form-label">Min Price:</label>
+                        <input type="number" class="form-control" id="min_price" name="min_price" min="0" step="0.01">
+                    </div>
+                    <div class="col">
+                        <label for="max_price" class="form-label">Max Price:</label>
+                        <input type="number" class="form-control" id="max_price" name="max_price" min="0" step="0.01">
+        </div>
+        </div>
+
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input" id="apply_discount_filter" name="apply_discount_filter" value="true">
+                    <label class="form-check-label" for="apply_discount_filter">
+                Apply 'Big Sale' Discount Filter
+            </label>
+        </div>
+
+                <div class="form-check mb-3">
+                    <input type="checkbox" class="form-check-input" id="free_shipping" name="free_shipping" value="true">
+                    <label class="form-check-label" for="free_shipping">
+                Free Shipping Only
+            </label>
+        </div>
+            </div>
+        </div>
+
+        <!-- Card for Field Selection -->
+        <div class="card mb-4">
+             <div class="card-header">Select Output Fields</div>
+             <div class="card-body">
+                <fieldset class="border-0 p-0 m-0">
+                    <div class="row">
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Product ID" id="field_product_id" checked >
+                                <label class="form-check-label" for="field_product_id">Product ID</label>
+                            </div>
+                        </div>
+                         <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Title" id="field_title" checked >
+                                <label class="form-check-label" for="field_title">Title</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Sale Price" id="field_sale_price" checked>
+                                <label class="form-check-label" for="field_sale_price">Sale Price</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Original Price" id="field_orig_price" checked>
+                                <label class="form-check-label" for="field_orig_price">Original Price</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Discount (%)" id="field_discount" checked>
+                                <label class="form-check-label" for="field_discount">Discount (%)</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Currency" id="field_currency" checked>
+                                <label class="form-check-label" for="field_currency">Currency</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Rating" id="field_rating" checked>
+                                <label class="form-check-label" for="field_rating">Rating</label>
+                            </div>
+                        </div>
+                         <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Orders Count" id="field_orders" checked>
+                                <label class="form-check-label" for="field_orders">Orders Count</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Store Name" id="field_store_name" checked>
+                                <label class="form-check-label" for="field_store_name">Store Name</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Store ID" id="field_store_id">
+                                <label class="form-check-label" for="field_store_id">Store ID</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Store URL" id="field_store_url">
+                                <label class="form-check-label" for="field_store_url">Store URL</label>
+                            </div>
+                        </div>
+                         <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Product URL" id="field_product_url" checked >
+                                <label class="form-check-label" for="field_product_url">Product URL</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-sm-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="selected_fields" value="Image URL" id="field_image_url">
+                                <label class="form-check-label" for="field_image_url">Image URL</label>
+                            </div>
+                        </div>
+            </div>
+        </fieldset>
+             </div>
+        </div>
+
+        <button type="submit" id="submit-button" class="btn btn-primary">
+            <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+            <span class="button-text">Start Scraping</span>
+        </button>
+    </form>
+
+    <!-- Card for Log Output -->
+    <div class="card mb-4">
+         <div class="card-header">Scraping Log</div>
+         <div class="card-body p-0"> <!-- Remove padding to let pre take full space -->
+            <!-- Changed from <pre> to <div> to allow HTML content rendering -->
+            <div id="log" class="form-control mb-0 border-0" style="height: 300px; overflow-y: scroll; background-color: #f8f9fa; border-radius: 0 0 var(--bs-card-inner-border-radius) var(--bs-card-inner-border-radius); font-family: monospace; font-size: 0.9em;">Submit the form to start scraping...</div>
+         </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle (includes Popper) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script>
+        const form = document.getElementById('scrape-form');
+        const logArea = document.getElementById('log');
+        const submitButton = document.getElementById('submit-button');
+        const spinner = submitButton.querySelector('.spinner-border');
+        const buttonText = submitButton.querySelector('.button-text');
+        let eventSource = null;
+
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            submitButton.disabled = true; // Disable button
+            spinner.classList.remove('d-none'); // Show spinner
+            buttonText.textContent = 'Scraping...'; // Change text
+
+            logArea.innerHTML = ''; // Clear previous log
+            appendLogMessage('Starting scraping process...', 'fw-bold'); // Initial message
+
+            logArea.classList.remove('is-invalid'); // Remove error state if present
+
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            // Required fields
+            params.append('keyword', formData.get('keyword'));
+            params.append('pages', formData.get('pages'));
+
+            // Optional fields
+            const minPrice = formData.get('min_price');
+            if (minPrice) params.append('min_price', minPrice);
+
+            const maxPrice = formData.get('max_price');
+            if (maxPrice) params.append('max_price', maxPrice);
+
+            // Boolean flags - send true/false
+            params.append('apply_discount', formData.has('apply_discount_filter') ? 'true' : 'false');
+            params.append('free_shipping', formData.has('free_shipping') ? 'true' : 'false');
+
+            // Selected fields (including disabled essential ones)
+            const selectedFields = [];
+            form.querySelectorAll('input[name="selected_fields"]:checked').forEach(checkbox => {
+                selectedFields.push(checkbox.value);
+            });
+
+            // Add a check here: if no fields selected, show error and stop
+            if (selectedFields.length === 0) {
+                 appendLogMessage('ERROR: Please select at least one output field.', 'text-danger fw-bold');
+                 logArea.classList.add('is-invalid');
+                 submitButton.disabled = false; // Re-enable button
+                 return;
+            }
+            selectedFields.forEach(field => params.append('fields', field));
+
+            const streamUrl = `/stream-scrape?${params.toString()}`;
+            console.log("Connecting to:", streamUrl);
+
+            eventSource = new EventSource(streamUrl);
+
+            eventSource.onmessage = function(event) {
+                const message = event.data;
+                console.log("SSE Message:", message);
+
+                if (message === "PROCESS_COMPLETE") {
+                    appendLogMessage('--- Process Finished ---', 'text-success fw-bold');
+                    if (eventSource) eventSource.close();
+                    submitButton.disabled = false; // Re-enable button
+                    spinner.classList.add('d-none'); // Hide spinner
+                    buttonText.textContent = 'Start Scraping'; // Restore text
+                } else if (message.startsWith("ERROR:")) {
+                    appendLogMessage(message, 'text-danger fw-bold'); // Style error messages
+                    logArea.classList.add('is-invalid'); // Visual indication of error
+                    logArea.scrollTop = logArea.scrollHeight;
+                    if (eventSource) eventSource.close();
+                    submitButton.disabled = false; // Re-enable button
+                    spinner.classList.add('d-none'); // Hide spinner
+                    buttonText.textContent = 'Start Scraping'; // Restore text
+                } else {
+                    let styleClass = '';
+                    // Prioritize key steps for bold
+                    if (message.includes('Initializing session') || 
+                        message.includes('Starting scraping') || 
+                        message.includes('Extracting product details') || 
+                        message.includes('Saving results') ||
+                        message.match(/Attempting to fetch page \d+/)) { // Make 'Fetching page X' bold
+                         styleClass = 'fw-bold';
+                    } 
+                    // Then check for success messages
+                    else if (message.includes('Results saved to') || 
+                             message.includes('Scraping complete!')){
+                        styleClass = 'text-success fw-bold';
+                    } 
+                    // Then check for muted informational messages
+                    else if (message.includes('Using cached session') || 
+                             message.includes('cache expired') || 
+                             message.includes('cache invalid') || 
+                             message.includes('No session cache file found') || 
+                             message.includes('No items found') ||
+                             message.includes('Stopping due to')) {
+                        styleClass = 'text-muted';
+                    }
+                    // Default for other messages (like item counts, etc.)
+                    
+                    appendLogMessage(message, styleClass);
+                    logArea.scrollTop = logArea.scrollHeight;
+                }
+            };
+
+            eventSource.onerror = function(error) {
+                console.error("EventSource failed:", error);
+                 appendLogMessage('--- ERROR: Connection to server lost or stream error. Check server logs. ---', 'text-danger fw-bold');
+                logArea.classList.add('is-invalid'); // Visual indication of error
+                if (eventSource) eventSource.close(); // Ensure closed on error
+                submitButton.disabled = false; // Re-enable button
+                spinner.classList.add('d-none'); // Hide spinner
+                buttonText.textContent = 'Start Scraping'; // Restore text
+            };
+        });
+
+        // Helper function to append styled messages to the log area
+        function appendLogMessage(message, className = '') {
+            const messageElement = document.createElement('div'); // Use div for block display
+            if (className) {
+                messageElement.className = className;
+            }
+            // Replace newline characters from server message if needed, or just display as is
+            messageElement.textContent = message; // Use textContent to prevent XSS
+            logArea.appendChild(messageElement);
+        }
+    </script>
+
+</body>
+</html>
