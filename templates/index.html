@@ -176,14 +176,14 @@
 
         form.addEventListener('submit', (event) => {
             event.preventDefault();
-            submitButton.disabled = true; // Disable button
-            spinner.classList.remove('d-none'); // Show spinner
-            buttonText.textContent = 'Scraping...'; // Change text
+            submitButton.disabled = true;
+            spinner.classList.remove('d-none');
+            buttonText.textContent = 'Scraping...';
 
-            logArea.innerHTML = ''; // Clear previous log
-            appendLogMessage('Starting scraping process...', 'fw-bold'); // Initial message
+            logArea.innerHTML = '';
+            appendLogMessage('Starting scraping process...', 'fw-bold');
 
-            logArea.classList.remove('is-invalid'); // Remove error state if present
+            logArea.classList.remove('is-invalid');
 
             if (eventSource) {
                 eventSource.close();
@@ -192,32 +192,27 @@
             const formData = new FormData(form);
             const params = new URLSearchParams();
 
-            // Required fields
             params.append('keyword', formData.get('keyword'));
             params.append('pages', formData.get('pages'));
 
-            // Optional fields
             const minPrice = formData.get('min_price');
             if (minPrice) params.append('min_price', minPrice);
 
             const maxPrice = formData.get('max_price');
             if (maxPrice) params.append('max_price', maxPrice);
 
-            // Boolean flags - send true/false
             params.append('apply_discount', formData.has('apply_discount_filter') ? 'true' : 'false');
             params.append('free_shipping', formData.has('free_shipping') ? 'true' : 'false');
 
-            // Selected fields (including disabled essential ones)
             const selectedFields = [];
             form.querySelectorAll('input[name="selected_fields"]:checked').forEach(checkbox => {
                 selectedFields.push(checkbox.value);
             });
 
-            // Add a check here: if no fields selected, show error and stop
             if (selectedFields.length === 0) {
                  appendLogMessage('ERROR: Please select at least one output field.', 'text-danger fw-bold');
                  logArea.classList.add('is-invalid');
-                 submitButton.disabled = false; // Re-enable button
+                 submitButton.disabled = false;
                  return;
             }
             selectedFields.forEach(field => params.append('fields', field));
@@ -234,33 +229,30 @@
                 if (message === "PROCESS_COMPLETE") {
                     appendLogMessage('--- Process Finished ---', 'text-success fw-bold');
                     if (eventSource) eventSource.close();
-                    submitButton.disabled = false; // Re-enable button
-                    spinner.classList.add('d-none'); // Hide spinner
-                    buttonText.textContent = 'Start Scraping'; // Restore text
+                    submitButton.disabled = false;
+                    spinner.classList.add('d-none');
+                    buttonText.textContent = 'Start Scraping';
                 } else if (message.startsWith("ERROR:")) {
-                    appendLogMessage(message, 'text-danger fw-bold'); // Style error messages
-                    logArea.classList.add('is-invalid'); // Visual indication of error
+                    appendLogMessage(message, 'text-danger fw-bold');
+                    logArea.classList.add('is-invalid');
                     logArea.scrollTop = logArea.scrollHeight;
                     if (eventSource) eventSource.close();
-                    submitButton.disabled = false; // Re-enable button
-                    spinner.classList.add('d-none'); // Hide spinner
-                    buttonText.textContent = 'Start Scraping'; // Restore text
+                    submitButton.disabled = false;
+                    spinner.classList.add('d-none');
+                    buttonText.textContent = 'Start Scraping';
                 } else {
                     let styleClass = '';
-                    // Prioritize key steps for bold
                     if (message.includes('Initializing session') || 
                         message.includes('Starting scraping') || 
                         message.includes('Extracting product details') || 
                         message.includes('Saving results') ||
-                        message.match(/Attempting to fetch page \d+/)) { // Make 'Fetching page X' bold
+                        message.match(/Attempting to fetch page \d+/)) {
                          styleClass = 'fw-bold';
                     } 
-                    // Then check for success messages
                     else if (message.includes('Results saved to') || 
                              message.includes('Scraping complete!')){
                         styleClass = 'text-success fw-bold';
                     } 
-                    // Then check for muted informational messages
                     else if (message.includes('Using cached session') || 
                              message.includes('cache expired') || 
                              message.includes('cache invalid') || 
@@ -269,7 +261,6 @@
                              message.includes('Stopping due to')) {
                         styleClass = 'text-muted';
                     }
-                    // Default for other messages (like item counts, etc.)
                     
                     appendLogMessage(message, styleClass);
                     logArea.scrollTop = logArea.scrollHeight;
@@ -279,22 +270,20 @@
             eventSource.onerror = function(error) {
                 console.error("EventSource failed:", error);
                  appendLogMessage('--- ERROR: Connection to server lost or stream error. Check server logs. ---', 'text-danger fw-bold');
-                logArea.classList.add('is-invalid'); // Visual indication of error
-                if (eventSource) eventSource.close(); // Ensure closed on error
-                submitButton.disabled = false; // Re-enable button
-                spinner.classList.add('d-none'); // Hide spinner
-                buttonText.textContent = 'Start Scraping'; // Restore text
+                logArea.classList.add('is-invalid');
+                if (eventSource) eventSource.close();
+                submitButton.disabled = false;
+                spinner.classList.add('d-none');
+                buttonText.textContent = 'Start Scraping';
             };
         });
 
-        // Helper function to append styled messages to the log area
         function appendLogMessage(message, className = '') {
-            const messageElement = document.createElement('div'); // Use div for block display
+            const messageElement = document.createElement('div');
             if (className) {
                 messageElement.className = className;
             }
-            // Replace newline characters from server message if needed, or just display as is
-            messageElement.textContent = message; // Use textContent to prevent XSS
+            messageElement.textContent = message;
             logArea.appendChild(messageElement);
         }
     </script>
