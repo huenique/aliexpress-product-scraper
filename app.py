@@ -31,7 +31,7 @@ def stream_scrape():
     apply_discount = request.args.get('apply_discount', 'false') == 'true'
     free_shipping = request.args.get('free_shipping', 'false') == 'true'
     selected_fields = request.args.getlist('fields')
-
+    delay = request.args.get('delay', 1.0, type=float)  # Default 1 second
 
     if not keyword:
         def error_stream():
@@ -52,7 +52,8 @@ def stream_scrape():
         free_shipping=free_shipping,
         min_price=min_price,
         max_price=max_price,
-        selected_fields=selected_fields
+        selected_fields=selected_fields,
+        delay=delay  # Add delay parameter
     )
 
     return Response(stream_with_context(stream), mimetype='text/event-stream')

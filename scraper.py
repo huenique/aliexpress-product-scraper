@@ -121,7 +121,7 @@ def initialize_session_data(keyword, log_callback=default_logger):
 
 def scrape_aliexpress_data(keyword, max_pages, cookies, user_agent,
                            apply_discount_filter=False, apply_free_shipping_filter=False,
-                           min_price=None, max_price=None, log_callback=default_logger):
+                           min_price=None, max_price=None, delay=1.0, log_callback=default_logger):
     """
     Uses SessionPage and extracted session data to scrape product results
     for the given keyword via direct API calls, optionally applying filters.
@@ -235,7 +235,7 @@ def scrape_aliexpress_data(keyword, max_pages, cookies, user_agent,
             break
 
         # Delay between requests
-        time.sleep(0.2)
+        time.sleep(delay)
 
     log_callback(f"\nAPI Scraping finished for product: '{keyword}'. Total raw products collected: {len(all_products_raw)}")
     return all_products_raw
@@ -357,7 +357,7 @@ class StreamLogger:
     def stop(self):
         self.active = False
 
-def run_scrape_job(keyword, pages, apply_discount, free_shipping, min_price, max_price, selected_fields):
+def run_scrape_job(keyword, pages, apply_discount, free_shipping, min_price, max_price, selected_fields, delay=1.0):
     """
     Generator function that orchestrates the scraping process with real-time logging.
     """
@@ -380,6 +380,7 @@ def run_scrape_job(keyword, pages, apply_discount, free_shipping, min_price, max
                 apply_free_shipping_filter=free_shipping,
                 min_price=min_price,
                 max_price=max_price,
+                delay=delay,
                 log_callback=logger.log
             )
             
