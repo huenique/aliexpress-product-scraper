@@ -8,10 +8,10 @@ A powerful and user-friendly web interface for scraping product data from AliExp
 ## Screenshots
 
 ### Search Interface
-![Search Interface](screenshots/Capture.PNG)
+![Search Interface](screenshots/Capture1.PNG)
 
 ### Results and Field Selection
-![Field Selection and Results](screenshots/Capture1.PNG)
+![Field Selection and Results](screenshots/Capture.PNG)
 
 ## Features
 
