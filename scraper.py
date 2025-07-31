@@ -1,14 +1,15 @@
-import time
+import csv
+import datetime
 import json
 import os
-import csv
-from urllib.parse import quote_plus
-from DrissionPage import WebPage, SessionPage, ChromiumOptions
-import datetime
-from typing import Generator
 import threading
-from queue import Queue
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+from typing import Generator
+from urllib.parse import quote_plus
+
+from DrissionPage import ChromiumOptions, SessionPage, WebPage
 
 API_URL = 'https://www.aliexpress.com/fn/search-pc/index'
 RESULTS_DIR = "results"
@@ -72,6 +73,8 @@ def initialize_session_data(keyword, log_callback=default_logger):
     browser_page = None
     try:
         co = ChromiumOptions()
+        # Set the browser path to snap-installed Chromium
+        co.set_browser_path('/snap/bin/chromium')
         co.no_imgs(True)
         # --- Block CSS ---
         co.set_pref('permissions.default.stylesheet', 2)
@@ -125,6 +128,7 @@ def scrape_aliexpress_data(keyword, max_pages, cookies, user_agent,
     """
     Uses SessionPage and extracted session data to scrape product results
     for the given keyword via direct API calls, optionally applying filters.
+    Returns (raw_products, session_page) tuple.
     """
     log_callback(f"\nCreating SessionPage for API calls for product: '{keyword}'")
     session_page = SessionPage()
@@ -238,12 +242,199 @@ def scrape_aliexpress_data(keyword, max_pages, cookies, user_agent,
         time.sleep(delay)
 
     log_callback(f"\nAPI Scraping finished for product: '{keyword}'. Total raw products collected: {len(all_products_raw)}")
-    return all_products_raw
+    return all_products_raw, session_page
 
-def extract_product_details(raw_products, selected_fields, log_callback=default_logger):
+def fetch_store_info_batch(product_ids, session_page, log_callback=default_logger, max_workers=3):
+    """
+    Fetches store information for multiple products using a shared browser pool.
+    Much faster than fetching one product at a time.
+    Returns a dict mapping product_id -> store_info.
+    """
+    if not product_ids:
+        return {}
+    
+    log_callback(f"Fetching store info for {len(product_ids)} products using {max_workers} workers...")
+    
+    # Shared browser pool to reuse browser instances
+    browser_pool = []
+    store_results = {}
+    
+    def create_browser():
+        """Create a configured browser instance"""
+        co = ChromiumOptions()
+        co.set_browser_path('/snap/bin/chromium')
+        co.headless(True)
+        co.no_imgs(True)  # Disable images for faster loading
+        co.set_pref('permissions.default.stylesheet', 2)  # Block CSS
+        co.set_argument('--disable-javascript')  # Try without JS first
+        co.set_argument('--disable-plugins')
+        co.set_argument('--disable-extensions')
+        co.set_argument('--no-sandbox')
+        co.set_argument('--disable-dev-shm-usage')
+        
+        return WebPage(chromium_options=co)
+    
+    def fetch_single_store_info(product_id, browser):
+        """Fetch store info for a single product using provided browser"""
+        try:
+            product_url = f"https://www.aliexpress.com/item/{product_id}.html"
+            
+            # Try to get the page with minimal wait
+            browser.get(product_url, timeout=10)
+            
+            store_name = None
+            store_id = None
+            store_url = None
+            
+            # Method 1: Extract from URL patterns in page source
+            try:
+                page_html = browser.html
+                import re
+
+                # Look for store URL patterns in the HTML
+                store_url_patterns = [
+                    r'href="([^"]*)/store/(\d+)[^"]*"',
+                    r'"storeURL":"([^"]*)"',
+                    r'"storeId":"?(\d+)"?',
+                    r'/store/(\d+)'
+                ]
+                
+                for pattern in store_url_patterns:
+                    matches = re.findall(pattern, page_html)
+                    if matches:
+                        if len(matches[0]) == 2:  # URL and ID
+                            store_url, store_id = matches[0]
+                            if not store_url.startswith('http'):
+                                store_url = f"https:{store_url}"
+                        elif isinstance(matches[0], str) and matches[0].isdigit():
+                            store_id = matches[0]
+                        break
+                
+                # Look for store name patterns
+                store_name_patterns = [
+                    r'"storeName":"([^"]+)"',
+                    r'"store_name":"([^"]+)"',
+                    r'Sold by ([^<\n\r]+)',
+                    r'data-spm-anchor-id="[^"]*">([^<]+)</a>[^<]*store'
+                ]
+                
+                for pattern in store_name_patterns:
+                    match = re.search(pattern, page_html, re.IGNORECASE)
+                    if match:
+                        store_name = match.group(1).strip()
+                        break
+            
+            except Exception as e:
+                log_callback(f"Error extracting store info from HTML for {product_id}: {e}")
+            
+            # Method 2: Try with minimal DOM interaction if JavaScript needed
+            if not store_name and not store_id:
+                try:
+                    # Quick check for store elements
+                    store_links = browser.eles('css:a[href*="/store/"]', timeout=2)
+                    if store_links:
+                        for link in store_links[:2]:  # Check first 2 links only
+                            href = link.attr('href')
+                            if href and '/store/' in href:
+                                import re
+                                store_id_match = re.search(r'/store/(\d+)', href)
+                                if store_id_match:
+                                    store_id = store_id_match.group(1)
+                                    store_url = href if href.startswith('http') else f"https:{href}"
+                                    break
+                except:
+                    pass
+            
+            if store_name or store_id:
+                return {
+                    'store_name': store_name,
+                    'store_id': store_id,
+                    'store_url': store_url
+                }
+            else:
+                return None
+                
+        except Exception as e:
+            log_callback(f"Error fetching store info for {product_id}: {e}")
+            return None
+    
+    def worker_function(worker_id, product_batch):
+        """Worker function that processes a batch of products"""
+        browser = None
+        worker_results = {}
+        
+        try:
+            browser = create_browser()
+            log_callback(f"Worker {worker_id}: Processing {len(product_batch)} products")
+            
+            for i, product_id in enumerate(product_batch):
+                try:
+                    store_info = fetch_single_store_info(product_id, browser)
+                    worker_results[product_id] = store_info
+                    
+                    if store_info:
+                        log_callback(f"Worker {worker_id}: Found store for {product_id}: {store_info.get('store_name', 'N/A')}")
+                    
+                    # Small delay between requests to avoid overwhelming server
+                    if i < len(product_batch) - 1:  # Don't delay after last item
+                        time.sleep(0.2)
+                        
+                except Exception as e:
+                    log_callback(f"Worker {worker_id}: Error processing {product_id}: {e}")
+                    worker_results[product_id] = None
+                    
+        except Exception as e:
+            log_callback(f"Worker {worker_id}: Failed to create browser: {e}")
+        finally:
+            if browser:
+                try:
+                    browser.quit()
+                except:
+                    pass
+        
+        return worker_results
+    
+    # Split products into batches for parallel processing
+    batch_size = max(1, len(product_ids) // max_workers)
+    product_batches = [product_ids[i:i + batch_size] for i in range(0, len(product_ids), batch_size)]
+    
+    # Process batches in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        for i, batch in enumerate(product_batches):
+            future = executor.submit(worker_function, i+1, batch)
+            futures.append(future)
+        
+        # Collect results
+        for future in as_completed(futures):
+            try:
+                worker_results = future.result()
+                store_results.update(worker_results)
+            except Exception as e:
+                log_callback(f"Worker failed: {e}")
+    
+    successful_fetches = sum(1 for result in store_results.values() if result is not None)
+    log_callback(f"Store info batch fetch complete: {successful_fetches}/{len(product_ids)} successful")
+    
+    return store_results
+
+def fetch_store_info_from_product_page(product_id, session_page, log_callback=default_logger):
+    """
+    Legacy function for backward compatibility.
+    For better performance, use fetch_store_info_batch() instead.
+    """
+    if not product_id:
+        return None
+    
+    # Use the batch function for single product
+    results = fetch_store_info_batch([product_id], session_page, log_callback, max_workers=1)
+    return results.get(product_id)
+
+def extract_product_details(raw_products, selected_fields, session_page=None, 
+                           fetch_store_info=False, log_callback=default_logger):
     """
     Extracts and formats desired fields from the raw product data,
-    based on the user's selection.
+    based on the user's selection. Now uses batch processing for store info.
     """
     extracted_data = []
     if not raw_products or not selected_fields:
@@ -251,6 +442,17 @@ def extract_product_details(raw_products, selected_fields, log_callback=default_
         return extracted_data
 
     log_callback(f"Extracting selected fields: {selected_fields}")
+    
+    # Collect all product IDs that need store info
+    store_info_results = {}
+    if fetch_store_info and session_page:
+        store_fields_requested = any(field in selected_fields for field in ['Store Name', 'Store ID', 'Store URL'])
+        if store_fields_requested:
+            product_ids = [product.get('productId') for product in raw_products if product.get('productId')]
+            if product_ids:
+                log_callback(f"Batch fetching store info for {len(product_ids)} products...")
+                store_info_results = fetch_store_info_batch(product_ids, session_page, log_callback, max_workers=3)
+    
     for product in raw_products:
         # --- Extract ALL possible fields first ---
         product_id = product.get('productId')
@@ -265,12 +467,19 @@ def extract_product_details(raw_products, selected_fields, log_callback=default_
         original_price = original_price_info.get('formattedPrice')
         currency = sale_price_info.get('currencyCode')
         discount = sale_price_info.get('discount')
-        store_info = product.get('store', {})
-        store_name = store_info.get('storeName')
-        store_id = store_info.get('storeId')
-        store_url = store_info.get('storeUrl')
-        if store_url and not store_url.startswith('http'):
-            store_url = 'https:' + store_url
+        
+        # Get store info from batch results
+        store_name = None
+        store_id = None
+        store_url = None
+        
+        if product_id in store_info_results:
+            store_info = store_info_results[product_id]
+            if store_info:
+                store_name = store_info.get('store_name')
+                store_id = store_info.get('store_id')
+                store_url = store_info.get('store_url')
+        
         trade_info = product.get('trade', {})
         orders_count = trade_info.get('realTradeCount')
         rating = product.get('evaluation', {}).get('starRating')
@@ -371,7 +580,7 @@ def run_scrape_job(keyword, pages, apply_discount, free_shipping, min_price, max
             )
             
             logger.log(f"Starting scraping for {pages} pages...")
-            raw_products = scrape_aliexpress_data(
+            raw_products, session_page = scrape_aliexpress_data(
                 keyword=keyword,
                 max_pages=pages,
                 cookies=cookies,
@@ -384,10 +593,17 @@ def run_scrape_job(keyword, pages, apply_discount, free_shipping, min_price, max
                 log_callback=logger.log
             )
             
+            # Check if store information is requested
+            store_fields_requested = any(field in selected_fields for field in ['Store Name', 'Store ID', 'Store URL'])
+            if store_fields_requested:
+                logger.log("Store information requested - fetching store details from product pages...")
+            
             logger.log("Extracting product details...")
             extracted_data = extract_product_details(
                 raw_products,
                 selected_fields,
+                session_page=session_page,
+                fetch_store_info=store_fields_requested,
                 log_callback=logger.log
             )
             
@@ -433,13 +649,22 @@ if __name__ == "__main__":
                 print("Invalid input. Please enter a number.")
 
         fresh_cookies, fresh_user_agent = initialize_session_data(search_keyword_input)
-        raw_products = scrape_aliexpress_data(search_keyword_input, num_pages_to_scrape,
+        raw_products, session_page = scrape_aliexpress_data(search_keyword_input, num_pages_to_scrape,
                                              fresh_cookies, fresh_user_agent)
         all_fields_for_direct_run = [
             'Product ID', 'Title', 'Sale Price', 'Original Price', 'Discount (%)',
             'Currency', 'Rating', 'Orders Count', 'Store Name', 'Store ID',
             'Store URL', 'Product URL', 'Image URL'
         ]
-        extracted_products = extract_product_details(raw_products, all_fields_for_direct_run)
+        
+        # Enable store info fetching for direct run
+        store_fields_requested = any(field in all_fields_for_direct_run for field in ['Store Name', 'Store ID', 'Store URL'])
+        
+        extracted_products = extract_product_details(
+            raw_products, 
+            all_fields_for_direct_run, 
+            session_page=session_page,
+            fetch_store_info=store_fields_requested
+        )
         save_results(search_keyword_input, extracted_products, all_fields_for_direct_run)
         print("\nScript finished.")
