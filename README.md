@@ -8,9 +8,11 @@ A powerful and user-friendly web interface for scraping product data from AliExp
 ## Screenshots
 
 ### Search Interface
+
 ![Search Interface](screenshots/Capture1.PNG)
 
 ### Results and Field Selection
+
 ![Field Selection and Results](screenshots/Capture.PNG)
 
 ## Features
@@ -18,7 +20,7 @@ A powerful and user-friendly web interface for scraping product data from AliExp
 - 🌐 **Web Interface**: Clean and intuitive UI for easy interaction
 - 🚀 **API-Based Scraping**: Fast and efficient data collection using AliExpress's unofficial API
 - 🔒 **Smart Session Management**: Uses browser automation only for initial cookie collection
-- 🛡️ **Anti-Block Protection**: 
+- 🛡️ **Anti-Block Protection**:
   - Configurable delay between requests (0.2-10 seconds)
   - Sequential request processing to avoid overwhelming the server
   - Session caching to minimize browser automation
@@ -53,29 +55,55 @@ A powerful and user-friendly web interface for scraping product data from AliExp
 ## Installation
 
 1. Clone the repository:
-```bash
-git clone https://github.com/ImranDevPython/aliexpress-scraper.git
-cd aliexpress-scraper
-```
+
+   ```bash
+   git clone https://github.com/ImranDevPython/aliexpress-scraper.git
+   cd aliexpress-scraper
+   ```
 
 2. Install required packages:
-```bash
-pip install -r requirements.txt
-```
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Configuration
+
+### Environment Variables Setup
+
+1. Copy the example environment file:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit the `.env` file and add your Oxylabs proxy credentials:
+
+   ```bash
+   # Oxylabs U.S. Residential Proxy Configuration
+   OXYLABS_USERNAME=your_oxylabs_username_here
+   OXYLABS_PASSWORD=your_oxylabs_password_here
+   OXYLABS_ENDPOINT=pr.oxylabs.io:7777
+   ```
+
+**Note**: The scraper uses Oxylabs U.S. residential proxy for enhanced reliability and store information extraction. Make sure to obtain valid credentials from Oxylabs.
 
 ## Usage
 
 1. Start the web interface:
-```bash
-python app.py
-```
+
+   ```bash
+   python app.py
+   ```
 
 2. Open your browser and navigate to:
-```
-http://localhost:5000
-```
+
+   ```sh
+   http://localhost:5000
+   ```
 
 3. In the web interface:
+
    - Enter your search keyword
    - Select number of pages to scrape (1-60)
    - Choose which fields to include
@@ -84,6 +112,7 @@ http://localhost:5000
    - Start scraping and monitor progress
 
 4. Results will be saved in the `results` folder as:
+
    - `aliexpress_[keyword]_extracted.json`
    - `aliexpress_[keyword]_extracted.csv`
 
@@ -130,4 +159,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Disclaimer
 
-This tool is for educational purposes only. Use responsibly and in accordance with AliExpress's terms of service. 
+This tool is for educational purposes only. Use responsibly and in accordance with AliExpress's terms of service.

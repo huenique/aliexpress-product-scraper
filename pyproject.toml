@@ -5,6 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "python-dotenv>=1.0.0",
     "drissionpage>=4.1.1.1",
     "flask>=3.1.1",
+    "playwright>=1.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.7",
 ]
