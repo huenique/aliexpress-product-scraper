@@ -140,3 +140,7 @@ session_cache.json
 Thumbs.db
 ehthumbs.db
 desktop.ini
+
+# Scraper debug
+debug/*.html
+debug/*.json

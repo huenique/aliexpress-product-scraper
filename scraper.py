@@ -6,12 +6,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Generator
 from urllib.parse import quote_plus
 
+import requests
 from dotenv import load_dotenv
-from DrissionPage import ChromiumOptions, SessionPage, WebPage
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Route, sync_playwright
 
 # Load environment variables from .env file
 load_dotenv()
@@ -57,7 +57,7 @@ def default_logger(message: str) -> None:
 
 def initialize_session_data(
     keyword: str, log_callback: Callable[[str], None] = default_logger
-) -> Tuple[Dict[str, Any], str]:
+) -> tuple[dict[str, Any], str]:
     """
     Checks for cached session data first. If valid cache exists, uses it.
     Otherwise, when proxy is configured, uses predefined US-region defaults
@@ -98,50 +98,94 @@ def initialize_session_data(
     log_callback(
         "Fetching fresh session data using headless browser with Oxylabs U.S. residential proxy..."
     )
-    browser_page = None
+
+    playwright = None
+    browser = None
+    context = None
+    page = None
+
     try:
-        co = ChromiumOptions()
-        # Set the browser path to snap-installed Chromium
-        co.set_browser_path("/snap/bin/chromium")
-        co.no_imgs(True)
-        # --- Block CSS ---
-        co.set_pref("permissions.default.stylesheet", 2)
-        co.headless()
+        playwright = sync_playwright().start()
+
+        # Launch browser with optimization settings
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-images",
+                "--disable-css",
+                "--disable-plugins",
+                "--disable-extensions",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-background-networking",
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+                "--disable-blink-features=AutomationControlled",
+                "--excludeSwitches=enable-automation",
+            ],
+        )
+
         user_agent_string = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
-        co.set_user_agent(user_agent_string)
 
-        # --- Configure Oxylabs U.S. Residential Proxy ---
-        proxy_auth = f"{OXYLABS_USERNAME}:{OXYLABS_PASSWORD}"
-        proxy_server = f"http://{proxy_auth}@{OXYLABS_ENDPOINT}"
-        co.set_proxy(proxy_server)
-        log_callback(f"Configured Oxylabs U.S. residential proxy: {OXYLABS_ENDPOINT}")
+        # Configure context with proxy
+        context_options: dict[str, Any] = {
+            "user_agent": user_agent_string,
+            "java_script_enabled": False,  # Disable JS for faster loading
+            "ignore_https_errors": True,
+        }
 
-        # --- Other Stealth Options ---
-        co.set_argument("--disable-blink-features=AutomationControlled")
-        co.set_pref("credentials_enable_service", False)
-        co.set_pref("profile.password_manager_enabled", False)
-        co.set_argument("--excludeSwitches", "enable-automation")
+        # Configure Oxylabs U.S. Residential Proxy
+        if OXYLABS_USERNAME and OXYLABS_PASSWORD:
+            context_options["proxy"] = {
+                "server": f"http://{OXYLABS_ENDPOINT}",
+                "username": OXYLABS_USERNAME,
+                "password": OXYLABS_PASSWORD,
+            }
+            log_callback(
+                f"Configured Oxylabs U.S. residential proxy: {OXYLABS_ENDPOINT}"
+            )
 
-        browser_page = WebPage(chromium_options=co)  # type: ignore
-        browser_page.set.load_mode.eager()
+        context = browser.new_context(**context_options)
+
+        # Block CSS and images for faster loading
+        def handle_route(route: Route) -> None:
+            if route.request.resource_type in ["stylesheet", "image", "font", "media"]:
+                route.abort()
+            else:
+                route.continue_()
+
+        context.route("**/*", handle_route)
+
+        page = context.new_page()
 
         search_url = (
             f"https://www.aliexpress.com/w/wholesale-{quote_plus(keyword)}.html"
         )
         log_callback(
-            f"Visiting initial search page (eager load, images and CSS blocked): {search_url}"
+            f"Visiting initial search page (optimized load, images and CSS blocked): {search_url}"
         )
-        browser_page.get(search_url)  # type: ignore
+
+        # Navigate to page with timeout
+        page.goto(search_url, timeout=30000, wait_until="domcontentloaded")
 
         log_callback("Extracting fresh cookies and user agent...")
-        fresh_cookies = browser_page.cookies().as_dict()  # type: ignore
-        fresh_user_agent = browser_page.user_agent
-        log_callback(f"Using User-Agent: {fresh_user_agent}")
-        log_callback(f"Extracted {len(fresh_cookies)} cookies.")  # type: ignore
 
-        cache_content: Dict[str, Any] = {
+        # Get cookies from browser context
+        fresh_cookies_list = context.cookies()
+        fresh_cookies = {
+            cookie["name"]: cookie["value"]
+            for cookie in fresh_cookies_list
+            if "name" in cookie and "value" in cookie
+        }
+
+        fresh_user_agent = user_agent_string
+
+        log_callback(f"Using User-Agent: {fresh_user_agent}")
+        log_callback(f"Extracted {len(fresh_cookies)} cookies.")
+
+        cache_content: dict[str, Any] = {
             "timestamp": time.time(),
-            "cookies": fresh_cookies,  # type: ignore
+            "cookies": fresh_cookies,
             "user_agent": fresh_user_agent,
         }
         try:
@@ -151,52 +195,62 @@ def initialize_session_data(
         except IOError as e:
             log_callback(f"Error saving session cache: {e}")
 
-        return fresh_cookies, fresh_user_agent  # type: ignore
+        return fresh_cookies, fresh_user_agent
 
     except Exception as e:
         log_callback(f"An error occurred during browser initialization: {e}")
         raise
     finally:
         # --- Ensure browser is closed ---
-        if browser_page:
-            browser_page.quit()
+        if page:
+            page.close()
+        if context:
+            context.close()
+        if browser:
+            browser.close()
+        if playwright:
+            playwright.stop()
 
 
 def scrape_aliexpress_data(
     keyword: str,
     max_pages: int,
-    cookies: Dict[str, Any],
+    cookies: dict[str, Any],
     user_agent: str,
     apply_discount_filter: bool = False,
     apply_free_shipping_filter: bool = False,
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
     delay: float = 1.0,
     log_callback: Callable[[str], None] = default_logger,
-) -> Tuple[List[Dict[str, Any]], Any]:
+) -> tuple[list[dict[str, Any]], Any]:
     """
-    Uses SessionPage and extracted session data to scrape product results
+    Uses requests with extracted session data to scrape product results
     for the given keyword via direct API calls, optionally applying filters.
-    Returns (raw_products, session_page) tuple.
+    Returns (raw_products, session) tuple.
     """
     log_callback(
-        f"\nCreating SessionPage with Oxylabs U.S. residential proxy for API calls for product: '{keyword}'"
+        f"\nCreating requests session with Oxylabs U.S. residential proxy for API calls for product: '{keyword}'"
     )
-    session_page = SessionPage()
 
-    # Configure proxy for SessionPage
-    proxy_auth = f"{OXYLABS_USERNAME}:{OXYLABS_PASSWORD}"
-    proxy_url = f"http://{proxy_auth}@{OXYLABS_ENDPOINT}"
+    # Create requests session
+    session = requests.Session()
 
-    session_page.set.proxies(http=proxy_url, https=proxy_url)
-    session_page.set.cookies(cookies)
+    # Configure proxy for requests session
+    if OXYLABS_USERNAME and OXYLABS_PASSWORD:
+        proxy_auth = f"{OXYLABS_USERNAME}:{OXYLABS_PASSWORD}"
+        proxy_url = f"http://{proxy_auth}@{OXYLABS_ENDPOINT}"
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+
+    # Set cookies and headers
+    session.cookies.update(cookies)  # type: ignore
 
     current_base_headers = BASE_HEADERS.copy()
     current_base_headers["user-agent"] = user_agent
 
-    all_products_raw: List[Dict[str, Any]] = []
+    all_products_raw: list[dict[str, Any]] = []
 
-    active_switches: List[str] = []
+    active_switches: list[str] = []
     if apply_discount_filter:
         log_callback("Applying 'Big Sale' discount filter...")
         active_switches.append("filterCode:bigsale")
@@ -238,7 +292,7 @@ def scrape_aliexpress_data(
             referer_url += f"&pr={price_range_str}"
         request_headers["Referer"] = referer_url
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "pageVersion": "7ece9c0cc9cf2052db74f0d1b26b7033",
             "target": "root",
             "data": {
@@ -256,37 +310,36 @@ def scrape_aliexpress_data(
         if price_range_str:
             payload["data"]["pr"] = price_range_str
 
+        response: requests.Response | None = None
+
         # Make the POST request
-        success = session_page.post(API_URL, json=payload, headers=request_headers)  # type: ignore
-
-        if (
-            not success
-            or not session_page.response
-            or session_page.response.status_code != 200
-        ):
-            status = (
-                session_page.response.status_code if session_page.response else "N/A"
-            )
-            log_callback(
-                f"Failed to fetch page {current_page_num}. Status code: {status}"
-            )
-            if session_page.response:
-                log_callback(
-                    f"Response text sample: {session_page.response.text[:200]}"
-                )
-            break
-
         try:
-            json_data = session_page.json  # type: ignore
+            response = session.post(
+                API_URL, json=payload, headers=request_headers, timeout=30
+            )
+
+            if response.status_code != 200:
+                log_callback(
+                    f"Failed to fetch page {current_page_num}. Status code: {response.status_code}"
+                )
+                log_callback(f"Response text sample: {response.text[:200]}")
+                break
+
+            json_data: dict[str, Any] | None = response.json()
+
+            # save the json response to debug/ dir
+            # with open(f"debug/api_response_page_{current_page_num}.json", "w") as f:
+            #     json.dump(json_data, f, indent=4)
+
             if not isinstance(json_data, dict):
                 log_callback(
                     f"Unexpected response format for page {current_page_num}. Expected JSON dict."
                 )
-                log_callback(f"Response text sample: {session_page.html[:200]}")
+                log_callback(f"Response text sample: {response.text[:200]}")
                 break
 
-            items_list = (  # type: ignore
-                json_data.get("data", {})  # type: ignore
+            items_list = (
+                json_data.get("data", {})
                 .get("result", {})
                 .get("mods", {})
                 .get("itemList", {})
@@ -313,13 +366,21 @@ def scrape_aliexpress_data(
                     )
             else:
                 log_callback(
-                    f"Found {len(items_list)} items on page {current_page_num}."  # type: ignore
+                    f"Found {len(items_list)} items on page {current_page_num}."
                 )
-                all_products_raw.extend(items_list)  # type: ignore
+                all_products_raw.extend(items_list)
 
+        except requests.exceptions.RequestException as e:
+            log_callback(f"Request failed for page {current_page_num}: {e}")
+            break
         except json.JSONDecodeError:
             log_callback(f"Failed to decode JSON response for page {current_page_num}.")
-            log_callback(f"Response text sample: {session_page.html[:200]}")
+            if response:
+                log_callback(f"Response text sample: {response.text[:200]}")
+            else:
+                log_callback(
+                    "No response object available. This may indicate a connection error."
+                )
             break
         except Exception as e:
             log_callback(f"An error occurred processing page {current_page_num}: {e}")
@@ -331,22 +392,21 @@ def scrape_aliexpress_data(
     log_callback(
         f"\nAPI Scraping finished for product: '{keyword}'. Total raw products collected: {len(all_products_raw)}"
     )
-    return all_products_raw, session_page
+    return all_products_raw, session
 
 
 def fetch_store_info_batch(
-    product_ids: List[str],
-    session_page: Any,
+    product_ids: list[str],
+    session: Any,
     log_callback: Callable[[str], None] = default_logger,
     max_workers: int = 3,
-) -> Dict[str, Optional[Dict[str, Optional[str]]]]:
+) -> dict[str, dict[str, str | None]]:
     """
     Fetches store information for multiple products using a shared browser pool.
     Much faster than fetching one product at a time.
     Returns a dict mapping product_id -> store_info.
 
-    Note: Store info fetching will attempt to work with proxy authentication,
-    but may have limitations due to DrissionPage WebPage proxy support.
+    Note: Store info fetching uses Playwright with proxy authentication support.
     """
     if not product_ids:
         return {}
@@ -356,9 +416,9 @@ def fetch_store_info_batch(
     )
 
     # Shared browser pool to reuse browser instances
-    store_results: Dict[str, Optional[Dict[str, Optional[str]]]] = {}
+    store_results: dict[str, dict[str, str | None]] = {}
 
-    def create_browser() -> Any:
+    def create_browser() -> dict[str, Any]:
         """Create a configured Playwright browser instance for store info extraction"""
 
         playwright = sync_playwright().start()
@@ -386,6 +446,7 @@ def fetch_store_info_batch(
 
                 context = browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+                    java_script_enabled=True,
                     proxy={
                         "server": f"http://{OXYLABS_ENDPOINT}",
                         "username": OXYLABS_USERNAME,
@@ -398,7 +459,8 @@ def fetch_store_info_batch(
                 )
 
                 context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+                    java_script_enabled=True,
                 )
         except Exception as e:
             log_callback(
@@ -406,7 +468,8 @@ def fetch_store_info_batch(
             )
 
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+                java_script_enabled=True,
             )
 
         # Return both playwright instance and page for cleanup
@@ -420,7 +483,7 @@ def fetch_store_info_batch(
 
     def fetch_single_store_info(
         product_id: str, browser_obj: Any
-    ) -> Optional[Dict[str, Optional[str]]]:
+    ) -> dict[str, str | None] | None:
         """Fetch store info for a single product using Playwright browser"""
         try:
             product_url = f"https://www.aliexpress.com/item/{product_id}.html"
@@ -437,11 +500,11 @@ def fetch_store_info_batch(
             # Get HTML content for analysis
             html_content = page.content()
 
-            # Write the html_content to file for debug
-            # with open(f"playwright_debug_{product_id}.html", "w", encoding="utf-8") as f:
-            #     f.write(html_content)
-
-            log_callback(f"Page loaded successfully, HTML length: {len(html_content)}")
+            # Write the html_content to debug dir for debug
+            with open(
+                f"debug/playwright_debug_{product_id}.html", "w", encoding="utf-8"
+            ) as f:
+                f.write(html_content)
 
             # Debug: Check for bot challenge indicators
             if (
@@ -535,11 +598,6 @@ def fetch_store_info_batch(
                     f"Error in regex extraction for {product_id}: {regex_error}"
                 )
 
-            log_callback(f"Extracted store info for {product_id}:")
-            log_callback(f"  Store Name: {store_name}")
-            log_callback(f"  Store ID: {store_id}")
-            log_callback(f"  Store URL: {store_url}")
-
             return {
                 "store_name": store_name,
                 "store_id": store_id,
@@ -551,11 +609,11 @@ def fetch_store_info_batch(
             return None
 
     def worker_function(
-        worker_id: int, product_batch: List[str]
-    ) -> Dict[str, Optional[Dict[str, Optional[str]]]]:
+        worker_id: int, product_batch: list[str]
+    ) -> dict[str, dict[str, str | None]]:
         """Worker function that processes a batch of products"""
-        browser: Optional[Any] = None
-        worker_results: Dict[str, Optional[Dict[str, Optional[str]]]] = {}
+        browser: Any | None = None
+        worker_results: dict[str, dict[str, str | None]] = {}
 
         try:
             browser = create_browser()
@@ -566,7 +624,11 @@ def fetch_store_info_batch(
             for i, product_id in enumerate(product_batch):
                 try:
                     store_info = fetch_single_store_info(product_id, browser)
-                    worker_results[product_id] = store_info
+                    worker_results[product_id] = store_info or {
+                        "store_name": None,
+                        "store_id": None,
+                        "store_url": None,
+                    }
 
                     if store_info:
                         log_callback(
@@ -581,7 +643,11 @@ def fetch_store_info_batch(
                     log_callback(
                         f"Worker {worker_id}: Error processing {product_id}: {e}"
                     )
-                    worker_results[product_id] = None
+                    worker_results[product_id] = {
+                        "store_name": None,
+                        "store_id": None,
+                        "store_url": None,
+                    }
 
         except Exception as e:
             log_callback(f"Worker {worker_id}: Failed to create browser: {e}")
@@ -605,7 +671,7 @@ def fetch_store_info_batch(
 
     # Process batches in parallel
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures: List[Any] = []
+        futures: list[Any] = []
         for i, batch in enumerate(product_batches):
             future = executor.submit(worker_function, i + 1, batch)
             futures.append(future)
@@ -616,11 +682,14 @@ def fetch_store_info_batch(
                 worker_results = future.result()
                 store_results.update(worker_results)
             except Exception as e:
-                log_callback(f"Worker failed: {e}")
+                log_callback(f"Error in worker thread: {e}")
 
     successful_fetches = sum(
-        1 for result in store_results.values() if result is not None
+        1
+        for result in store_results.values()
+        if any(value is not None for value in result.values())
     )
+
     log_callback(
         f"Store info batch fetch complete: {successful_fetches}/{len(product_ids)} successful"
     )
@@ -630,9 +699,9 @@ def fetch_store_info_batch(
 
 def fetch_store_info_from_product_page(
     product_id: str,
-    session_page: Any,
+    session: Any,
     log_callback: Callable[[str], None] = default_logger,
-) -> Optional[Dict[str, Optional[str]]]:
+) -> dict[str, str | None] | None:
     """
     Legacy function for backward compatibility.
     For better performance, use fetch_store_info_batch() instead.
@@ -641,24 +710,22 @@ def fetch_store_info_from_product_page(
         return None
 
     # Use the batch function for single product
-    results = fetch_store_info_batch(
-        [product_id], session_page, log_callback, max_workers=1
-    )
+    results = fetch_store_info_batch([product_id], session, log_callback, max_workers=1)
     return results.get(product_id)
 
 
 def extract_product_details(
-    raw_products: List[Dict[str, Any]],
-    selected_fields: List[str],
-    session_page: Optional[Any] = None,
+    raw_products: list[dict[str, Any]],
+    selected_fields: list[str],
+    session: Any | None = None,
     fetch_store_info: bool = False,
     log_callback: Callable[[str], None] = default_logger,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Extracts and formats desired fields from the raw product data,
     based on the user's selection. Now uses batch processing for store info.
     """
-    extracted_data: List[Dict[str, Any]] = []
+    extracted_data: list[dict[str, Any]] = []
     if not raw_products or not selected_fields:
         log_callback("No raw products or selected fields for extraction.")
         return extracted_data
@@ -666,14 +733,14 @@ def extract_product_details(
     log_callback(f"Extracting selected fields: {selected_fields}")
 
     # Collect all product IDs that need store info
-    store_info_results: Dict[str, Optional[Dict[str, Optional[str]]]] = {}
-    if fetch_store_info and session_page:
+    store_info_results: dict[str, dict[str, str | None]] = {}
+    if fetch_store_info and session:
         store_fields_requested = any(
             field in selected_fields
             for field in ["Store Name", "Store ID", "Store URL"]
         )
         if store_fields_requested:
-            product_ids: List[str] = [
+            product_ids: list[str] = [
                 str(product.get("productId"))
                 for product in raw_products
                 if product.get("productId")
@@ -683,7 +750,7 @@ def extract_product_details(
                     f"Batch fetching store info for {len(product_ids)} products..."
                 )
                 store_info_results = fetch_store_info_batch(
-                    product_ids, session_page, log_callback, max_workers=3
+                    product_ids, session, log_callback, max_workers=3
                 )
 
     for product in raw_products:
@@ -721,7 +788,7 @@ def extract_product_details(
         )
 
         # --- Store all potentially extractable data in a temporary dict ---
-        full_details: Dict[str, Any] = {
+        full_details: dict[str, Any] = {
             "Product ID": product_id,
             "Title": title,
             "Sale Price": sale_price,
@@ -737,7 +804,7 @@ def extract_product_details(
             "Image URL": image_url,
         }
 
-        filtered_item: Dict[str, Any] = {
+        filtered_item: dict[str, Any] = {
             field: full_details.get(field) for field in selected_fields
         }
 
@@ -751,10 +818,10 @@ def extract_product_details(
 
 def save_results(
     keyword: str,
-    data: List[Dict[str, Any]],
-    selected_fields: List[str],
+    data: list[dict[str, Any]],
+    selected_fields: list[str],
     log_callback: Callable[[str], None] = default_logger,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """
     Saves the extracted data to JSON and CSV files, named using the keyword.
     Uses selected_fields for CSV headers.
@@ -822,9 +889,9 @@ def run_scrape_job(
     pages: int,
     apply_discount: bool,
     free_shipping: bool,
-    min_price: Optional[float],
-    max_price: Optional[float],
-    selected_fields: List[str],
+    min_price: float | None,
+    max_price: float | None,
+    selected_fields: list[str],
     delay: float = 1.0,
 ) -> Generator[str, None, None]:
     """
@@ -839,7 +906,7 @@ def run_scrape_job(
             )
 
             logger.log(f"Starting scraping for {pages} pages...")
-            raw_products, session_page = scrape_aliexpress_data(
+            raw_products, session = scrape_aliexpress_data(
                 keyword=keyword,
                 max_pages=pages,
                 cookies=cookies,
@@ -866,7 +933,7 @@ def run_scrape_job(
             extracted_data = extract_product_details(
                 raw_products,
                 selected_fields,
-                session_page=session_page,
+                session=session,
                 fetch_store_info=store_fields_requested,
                 log_callback=logger.log,
             )
@@ -914,7 +981,7 @@ if __name__ == "__main__":
                 print("Invalid input. Please enter a number.")
 
         fresh_cookies, fresh_user_agent = initialize_session_data(search_keyword_input)
-        raw_products, session_page = scrape_aliexpress_data(
+        raw_products, session = scrape_aliexpress_data(
             search_keyword_input, num_pages_to_scrape, fresh_cookies, fresh_user_agent
         )
         all_fields_for_direct_run = [
@@ -942,7 +1009,7 @@ if __name__ == "__main__":
         extracted_products = extract_product_details(
             raw_products,
             all_fields_for_direct_run,
-            session_page=session_page,
+            session=session,
             fetch_store_info=store_fields_requested,
         )
         save_results(
