@@ -3,7 +3,7 @@
 A powerful command-line tool for scraping product data from AliExpress using their unofficial API.
 
 ![MIT License](https://img.shields.io/badge/License-MIT-green.svg)
-![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
 
 ## Features
 
@@ -145,6 +145,58 @@ Results will be saved in the `results` folder as:
 
 - `aliexpress_[keyword]_extracted.json`
 - `aliexpress_[keyword]_extracted.csv`
+
+## Data Transformation
+
+The project includes a transformation utility to convert scraped AliExpress data into a standardized Listing table schema format.
+
+### Transform to Listing Format
+
+Use `transform_to_listing.py` to convert scraper results to a structured format suitable for database import or further processing:
+
+```bash
+# Transform JSON results
+python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json
+
+# Transform CSV results
+python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.csv
+
+# Specify output format and filename
+python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json -o transformed_data.csv -f csv
+python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json -o transformed_data.json -f json
+```
+
+### Transformation Features
+
+- **UUID Generation**: Creates unique identifiers for each listing
+- **Price Parsing**: Converts price strings to numeric values
+- **Price History**: Generates price history JSON from current prices
+- **Image URL Arrays**: Converts single image URLs to JSON arrays
+- **Schema Mapping**: Maps AliExpress fields to standardized Listing schema
+- **Data Validation**: Filters out incomplete records
+
+### Schema Mapping
+
+The transformation maps AliExpress data to the following Listing table schema:
+
+| Listing Field | AliExpress Source | Notes |
+|---------------|-------------------|-------|
+| `listing_uuid` | Generated | Unique UUID for each listing |
+| `product_title` | Title | Product name |
+| `item_number` | Product ID | AliExpress product identifier |
+| `price` | Sale Price | Parsed to numeric value |
+| `price_history` | Sale Price + Original Price | JSON array with current pricing |
+| `units_sold` | Orders Count | Number of orders |
+| `currency` | Currency | Price currency |
+| `listing_url` | Product URL | Direct link to product |
+| `brand_name` | Brand | User-specified brand |
+| `product_image_urls` | Image URL | JSON array format |
+| `listing_status` | - | Set to "New" |
+| `listing_state` | - | Set to "Active" |
+| `date_first_detected` | - | Current timestamp |
+| `last_checked` | - | Current timestamp |
+
+Other fields are set to appropriate defaults or null values where AliExpress data is not available.
 
 ## Available Fields
 
