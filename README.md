@@ -1,29 +1,20 @@
 # AliExpress Product Scraper
 
-A powerful and user-friendly web interface for scraping product data from AliExpress using their unofficial API.
+A powerful command-line tool for scraping product data from AliExpress using their unofficial API.
 
 ![MIT License](https://img.shields.io/badge/License-MIT-green.svg)
-![Python](https://img.shields.io/badge/Python-3.6+-blue.svg)
-
-## Screenshots
-
-### Search Interface
-
-![Search Interface](screenshots/Capture1.PNG)
-
-### Results and Field Selection
-
-![Field Selection and Results](screenshots/Capture.PNG)
+![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 
 ## Features
 
-- 🌐 **Web Interface**: Clean and intuitive UI for easy interaction
+- 🖥️ **Command-Line Interface**: Simple and efficient CLI for batch processing and automation
 - 🚀 **API-Based Scraping**: Fast and efficient data collection using AliExpress's unofficial API
 - 🔒 **Smart Session Management**: Uses browser automation only for initial cookie collection
 - 🛡️ **Anti-Block Protection**:
   - Configurable delay between requests (0.2-10 seconds)
   - Sequential request processing to avoid overwhelming the server
   - Session caching to minimize browser automation
+- 🌐 **Optional Proxy Support**: Oxylabs proxy integration for enhanced reliability
 - 📊 **Flexible Data Export**:
   - JSON format for full data preservation
   - CSV format for easy spreadsheet import
@@ -32,6 +23,7 @@ A powerful and user-friendly web interface for scraping product data from AliExp
   - Price range filtering
   - Discount deals filter
   - Free shipping filter
+  - Brand specification
 - 📝 **Real-time Progress**: Live logging of the scraping process
 
 ## How It Works
@@ -57,7 +49,7 @@ A powerful and user-friendly web interface for scraping product data from AliExp
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/ImranDevPython/aliexpress-scraper.git
+   git clone https://github.com/huenique/aliexpress-scraper.git
    cd aliexpress-scraper
    ```
 
@@ -65,6 +57,12 @@ A powerful and user-friendly web interface for scraping product data from AliExp
 
    ```bash
    pip install -r requirements.txt
+   ```
+
+   Or if using `uv`:
+
+   ```bash
+   uv sync
    ```
 
 ## Configuration
@@ -86,37 +84,71 @@ A powerful and user-friendly web interface for scraping product data from AliExp
    OXYLABS_ENDPOINT=pr.oxylabs.io:7777
    ```
 
-**Note**: The scraper uses Oxylabs U.S. residential proxy for enhanced reliability and store information extraction. Make sure to obtain valid credentials from Oxylabs.
+**Note**: The proxy provider is optional. The scraper can run without proxy, but using Oxylabs proxy enhances reliability and enables store information extraction.
 
 ## Usage
 
-1. Start the web interface:
+### Basic Usage
 
-   ```bash
-   python app.py
-   ```
+```bash
+python scraper.py --keyword "gaming mouse" --brand "Logitech"
+```
 
-2. Open your browser and navigate to:
+### Advanced Usage
 
-   ```sh
-   http://localhost:5000
-   ```
+```bash
+# Scrape multiple pages with filters
+python scraper.py --keyword "bluetooth headphones" --brand "Sony" --pages 5 --discount --free-shipping
 
-3. In the web interface:
+# Use proxy for enhanced reliability
+python scraper.py --keyword "mechanical keyboard" --brand "Razer" --pages 3 --proxy-provider oxylabs
 
-   - Enter your search keyword
-   - Select number of pages to scrape (1-60)
-   - Choose which fields to include
-   - Set optional filters (price range, discounts, shipping)
-   - Adjust request delay (recommended: 1 second)
-   - Start scraping and monitor progress
+# Extract specific fields only
+python scraper.py --keyword "laptop stand" --brand "Generic" --fields "Product ID" "Title" "Sale Price" "Brand"
 
-4. Results will be saved in the `results` folder as:
+# Apply price filters
+python scraper.py --keyword "phone case" --brand "Spigen" --min-price 10 --max-price 50
+```
 
-   - `aliexpress_[keyword]_extracted.json`
-   - `aliexpress_[keyword]_extracted.csv`
+### Command-Line Options
+
+```text
+Required arguments:
+  --keyword, -k         Product keyword to search for on AliExpress
+  --brand, -b          Brand name to associate with the scraped products
+
+Optional arguments:
+  --pages, -p          Number of pages to scrape (default: 1, max: 60)
+  --discount, -d       Apply 'Big Sale' discount filter
+  --free-shipping, -f  Apply 'Free Shipping' filter
+  --min-price         Minimum price filter
+  --max-price         Maximum price filter
+  --delay             Delay between requests in seconds (default: 1.0)
+  --fields            Specific fields to extract (default: all fields)
+  --proxy-provider    Proxy provider to use: oxylabs, massive (default: None)
+```
+
+### Examples
+
+```bash
+# Basic scraping
+python scraper.py --keyword "lego batman" --brand "LEGO" --pages 3
+
+# With proxy and filters
+python scraper.py --keyword "gaming mouse" --brand "Razer" --pages 5 --discount --free-shipping --proxy-provider oxylabs
+
+# Price range filtering
+python scraper.py --keyword "bluetooth headphones" --brand "Sony" --pages 2 --min-price 20 --max-price 100
+```
+
+Results will be saved in the `results` folder as:
+
+- `aliexpress_[keyword]_extracted.json`
+- `aliexpress_[keyword]_extracted.csv`
 
 ## Available Fields
+
+The scraper can extract the following product information:
 
 - Product ID
 - Title
@@ -126,11 +158,12 @@ A powerful and user-friendly web interface for scraping product data from AliExp
 - Currency
 - Rating
 - Orders Count
-- Store Name
-- Store ID
-- Store URL
+- Store Name (requires proxy)
+- Store ID (requires proxy)
+- Store URL (requires proxy)
 - Product URL
 - Image URL
+- Brand (user-specified)
 
 ## Best Practices
 
@@ -144,10 +177,20 @@ A powerful and user-friendly web interface for scraping product data from AliExp
    - Recommended: Start with fewer pages to test
    - Use filters to get more relevant results
 
-3. **Session Management**:
+3. **Proxy Usage**:
+   - Optional but recommended for store information extraction
+   - Required credentials in `.env` file when using `--proxy-provider`
+   - Helps avoid rate limiting and IP blocks
+
+4. **Session Management**:
    - Session data is cached for 30 minutes
    - Clear browser cookies if you encounter issues
    - Let the automated browser handle cookie collection
+
+5. **Field Selection**:
+   - Use `--fields` to extract only needed data for faster processing
+   - Omit `--fields` to get all available fields
+   - Store fields require proxy provider to be populated
 
 ## Contributing
 

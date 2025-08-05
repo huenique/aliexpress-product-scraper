@@ -1,3 +1,4 @@
+import argparse
 import csv
 import datetime
 import json
@@ -26,12 +27,7 @@ OXYLABS_USERNAME = os.getenv("OXYLABS_USERNAME")
 OXYLABS_PASSWORD = os.getenv("OXYLABS_PASSWORD")
 OXYLABS_ENDPOINT = os.getenv("OXYLABS_ENDPOINT", "pr.oxylabs.io:7777")
 
-# Validate required proxy credentials
-if not OXYLABS_USERNAME or not OXYLABS_PASSWORD:
-    raise ValueError(
-        "Missing Oxylabs credentials! Please ensure OXYLABS_USERNAME and OXYLABS_PASSWORD "
-        "are set in your .env file or environment variables."
-    )
+# Proxy validation will be done conditionally when proxy is requested
 
 # --- Base Headers (User-Agent will be updated from browser or cache) ---
 BASE_HEADERS = {
@@ -55,16 +51,35 @@ def default_logger(message: str) -> None:
     print(message)
 
 
+def validate_proxy_credentials(proxy_provider: str) -> None:
+    """Validate proxy credentials based on the provider."""
+    if proxy_provider == "oxylabs":
+        if not OXYLABS_USERNAME or not OXYLABS_PASSWORD:
+            raise ValueError(
+                "Missing Oxylabs credentials! Please ensure OXYLABS_USERNAME and OXYLABS_PASSWORD "
+                "are set in your .env file or environment variables."
+            )
+    elif proxy_provider == "massive":
+        # Add validation for massive proxy credentials when implemented
+        raise NotImplementedError("Massive proxy provider is not yet implemented")
+    # No validation needed if no proxy provider is specified
+
+
 def initialize_session_data(
-    keyword: str, log_callback: Callable[[str], None] = default_logger
+    keyword: str, 
+    proxy_provider: str = "",
+    log_callback: Callable[[str], None] = default_logger
 ) -> tuple[dict[str, Any], str]:
     """
     Checks for cached session data first. If valid cache exists, uses it.
-    Otherwise, when proxy is configured, uses predefined US-region defaults
-    to ensure USD currency. When no proxy is configured, launches a browser
-    to extract session data.
+    Otherwise, launches a browser to extract session data. If a proxy provider
+    is specified, configures proxy accordingly.
     """
     log_callback(f"Initializing session for product: '{keyword}'")
+    
+    # Validate proxy credentials if proxy provider is specified
+    if proxy_provider:
+        validate_proxy_credentials(proxy_provider)
 
     cached_data = None
 
@@ -95,9 +110,14 @@ def initialize_session_data(
         pass
 
     # --- Cache Miss or Expired: Launch Browser ---
-    log_callback(
-        "Fetching fresh session data using headless browser with Oxylabs U.S. residential proxy..."
-    )
+    if proxy_provider:
+        log_callback(
+            f"Fetching fresh session data using headless browser with {proxy_provider} proxy..."
+        )
+    else:
+        log_callback(
+            "Fetching fresh session data using headless browser (no proxy)..."
+        )
 
     playwright = None
     browser = None
@@ -127,23 +147,28 @@ def initialize_session_data(
 
         user_agent_string = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 
-        # Configure context with proxy
+        # Configure context with or without proxy
         context_options: dict[str, Any] = {
             "user_agent": user_agent_string,
             "java_script_enabled": False,  # Disable JS for faster loading
             "ignore_https_errors": True,
         }
 
-        # Configure Oxylabs U.S. Residential Proxy
-        if OXYLABS_USERNAME and OXYLABS_PASSWORD:
+        # Configure proxy based on provider
+        if proxy_provider == "oxylabs":
             context_options["proxy"] = {
                 "server": f"http://{OXYLABS_ENDPOINT}",
                 "username": OXYLABS_USERNAME,
                 "password": OXYLABS_PASSWORD,
             }
             log_callback(
-                f"Configured Oxylabs U.S. residential proxy: {OXYLABS_ENDPOINT}"
+                f"Configured Oxylabs proxy: {OXYLABS_ENDPOINT}"
             )
+        elif proxy_provider == "massive":
+            # Add massive proxy configuration when implemented
+            raise NotImplementedError("Massive proxy provider is not yet implemented")
+        else:
+            log_callback("No proxy configured - using direct connection")
 
         context = browser.new_context(**context_options)
 
@@ -217,6 +242,7 @@ def scrape_aliexpress_data(
     max_pages: int,
     cookies: dict[str, Any],
     user_agent: str,
+    proxy_provider: str = "",
     apply_discount_filter: bool = False,
     apply_free_shipping_filter: bool = False,
     min_price: float | None = None,
@@ -227,20 +253,30 @@ def scrape_aliexpress_data(
     """
     Uses requests with extracted session data to scrape product results
     for the given keyword via direct API calls, optionally applying filters.
+    Proxy usage is conditional based on proxy_provider parameter.
     Returns (raw_products, session) tuple.
     """
-    log_callback(
-        f"\nCreating requests session with Oxylabs U.S. residential proxy for API calls for product: '{keyword}'"
-    )
+    if proxy_provider:
+        log_callback(
+            f"\nCreating requests session with {proxy_provider} proxy for API calls for product: '{keyword}'"
+        )
+    else:
+        log_callback(
+            f"\nCreating requests session (no proxy) for API calls for product: '{keyword}'"
+        )
 
     # Create requests session
     session = requests.Session()
 
-    # Configure proxy for requests session
-    if OXYLABS_USERNAME and OXYLABS_PASSWORD:
+    # Configure proxy for requests session based on provider
+    if proxy_provider == "oxylabs":
         proxy_auth = f"{OXYLABS_USERNAME}:{OXYLABS_PASSWORD}"
         proxy_url = f"http://{proxy_auth}@{OXYLABS_ENDPOINT}"
         session.proxies = {"http": proxy_url, "https": proxy_url}
+    elif proxy_provider == "massive":
+        # Add massive proxy configuration when implemented
+        raise NotImplementedError("Massive proxy provider is not yet implemented")
+    # No proxy configuration if no provider specified
 
     # Set cookies and headers
     session.cookies.update(cookies)  # type: ignore
@@ -398,6 +434,7 @@ def scrape_aliexpress_data(
 def fetch_store_info_batch(
     product_ids: list[str],
     session: Any,
+    proxy_provider: str = "",
     log_callback: Callable[[str], None] = default_logger,
     max_workers: int = 3,
 ) -> dict[str, dict[str, str | None]]:
@@ -437,15 +474,17 @@ def fetch_store_info_batch(
             ],
         )
 
-        # Try to configure proxy settings for Oxylabs
+        # Configure proxy settings based on provider
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"
+        
         try:
-            if OXYLABS_USERNAME and OXYLABS_PASSWORD:
+            if proxy_provider == "oxylabs":
                 log_callback(
-                    f"Configured proxy: {OXYLABS_ENDPOINT} with user: {OXYLABS_USERNAME[:10]}..."
+                    f"Configured proxy: {OXYLABS_ENDPOINT} with user: {OXYLABS_USERNAME and OXYLABS_USERNAME[:10]}..."
                 )
 
                 context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+                    user_agent=user_agent,
                     java_script_enabled=True,
                     proxy={
                         "server": f"http://{OXYLABS_ENDPOINT}",
@@ -453,13 +492,13 @@ def fetch_store_info_batch(
                         "password": OXYLABS_PASSWORD,
                     },
                 )
+            elif proxy_provider == "massive":
+                # Add massive proxy configuration when implemented
+                raise NotImplementedError("Massive proxy provider is not yet implemented")
             else:
-                log_callback(
-                    "WARNING: No proxy credentials found, creating context without proxy"
-                )
-
+                log_callback("No proxy configured for store info fetching")
                 context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+                    user_agent=user_agent,
                     java_script_enabled=True,
                 )
         except Exception as e:
@@ -468,7 +507,7 @@ def fetch_store_info_batch(
             )
 
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+                user_agent=user_agent,
                 java_script_enabled=True,
             )
 
@@ -489,7 +528,10 @@ def fetch_store_info_batch(
             product_url = f"https://www.aliexpress.com/item/{product_id}.html"
             page = browser_obj["page"]
 
-            log_callback(f"Navigating to {product_url} with Oxylabs proxy...")
+            if proxy_provider:
+                log_callback(f"Navigating to {product_url} with {proxy_provider} proxy...")
+            else:
+                log_callback(f"Navigating to {product_url} (no proxy)...")
 
             # Navigate to the page with increased timeout
             page.goto(product_url, timeout=30000, wait_until="domcontentloaded")
@@ -700,6 +742,7 @@ def fetch_store_info_batch(
 def fetch_store_info_from_product_page(
     product_id: str,
     session: Any,
+    proxy_provider: str = "",
     log_callback: Callable[[str], None] = default_logger,
 ) -> dict[str, str | None] | None:
     """
@@ -710,13 +753,15 @@ def fetch_store_info_from_product_page(
         return None
 
     # Use the batch function for single product
-    results = fetch_store_info_batch([product_id], session, log_callback, max_workers=1)
+    results = fetch_store_info_batch([product_id], session, proxy_provider, log_callback, max_workers=1)
     return results.get(product_id)
 
 
 def extract_product_details(
     raw_products: list[dict[str, Any]],
     selected_fields: list[str],
+    brand: str,
+    proxy_provider: str = "",
     session: Any | None = None,
     fetch_store_info: bool = False,
     log_callback: Callable[[str], None] = default_logger,
@@ -750,7 +795,7 @@ def extract_product_details(
                     f"Batch fetching store info for {len(product_ids)} products..."
                 )
                 store_info_results = fetch_store_info_batch(
-                    product_ids, session, log_callback, max_workers=3
+                    product_ids, session, proxy_provider, log_callback, max_workers=3
                 )
 
     for product in raw_products:
@@ -802,6 +847,7 @@ def extract_product_details(
             "Store URL": store_url,
             "Product URL": product_url,
             "Image URL": image_url,
+            "Brand": brand,
         }
 
         filtered_item: dict[str, Any] = {
@@ -887,11 +933,13 @@ class StreamLogger:
 def run_scrape_job(
     keyword: str,
     pages: int,
+    brand: str,
     apply_discount: bool,
     free_shipping: bool,
     min_price: float | None,
     max_price: float | None,
     selected_fields: list[str],
+    proxy_provider: str = "",
     delay: float = 1.0,
 ) -> Generator[str, None, None]:
     """
@@ -902,7 +950,7 @@ def run_scrape_job(
     def scrape_task() -> None:
         try:
             cookies, user_agent = initialize_session_data(
-                keyword, log_callback=logger.log
+                keyword, proxy_provider, log_callback=logger.log
             )
 
             logger.log(f"Starting scraping for {pages} pages...")
@@ -911,6 +959,7 @@ def run_scrape_job(
                 max_pages=pages,
                 cookies=cookies,
                 user_agent=user_agent,
+                proxy_provider=proxy_provider,
                 apply_discount_filter=apply_discount,
                 apply_free_shipping_filter=free_shipping,
                 min_price=min_price,
@@ -933,6 +982,8 @@ def run_scrape_job(
             extracted_data = extract_product_details(
                 raw_products,
                 selected_fields,
+                brand,
+                proxy_provider,
                 session=session,
                 fetch_store_info=store_fields_requested,
                 log_callback=logger.log,
@@ -953,66 +1004,188 @@ def run_scrape_job(
     yield from logger.stream_messages()
 
 
-if __name__ == "__main__":
-    # Get keyword from user
-    search_keyword_input = input(
-        "Enter the product to search for on AliExpress: "
-    ).strip()
+def create_parser() -> argparse.ArgumentParser:
+    """Create and configure the argument parser for the CLI."""
+    parser = argparse.ArgumentParser(
+        description="AliExpress Product Scraper - Extract product data from AliExpress search results",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s --keyword "lego batman" --brand "LEGO" --pages 3
+  %(prog)s --keyword "gaming mouse" --brand "Razer" --pages 5 --discount --free-shipping --proxy-provider oxylabs
+  %(prog)s --keyword "bluetooth headphones" --brand "Sony" --pages 2 --min-price 20 --max-price 100
+        """
+    )
+    
+    # Required arguments
+    parser.add_argument(
+        "--keyword", "-k",
+        required=True,
+        help="Product keyword to search for on AliExpress"
+    )
+    
+    parser.add_argument(
+        "--brand", "-b",
+        required=True,
+        help="Brand name to associate with the scraped products"
+    )
+    
+    # Optional arguments
+    parser.add_argument(
+        "--pages", "-p",
+        type=int,
+        default=1,
+        choices=range(1, 61),
+        metavar="[1-60]",
+        help="Number of pages to scrape (default: 1, max: 60)"
+    )
+    
+    parser.add_argument(
+        "--discount", "-d",
+        action="store_true",
+        help="Apply 'Big Sale' discount filter"
+    )
+    
+    parser.add_argument(
+        "--free-shipping", "-f",
+        action="store_true",
+        help="Apply 'Free Shipping' filter"
+    )
+    
+    parser.add_argument(
+        "--min-price",
+        type=float,
+        help="Minimum price filter"
+    )
+    
+    parser.add_argument(
+        "--max-price",
+        type=float,
+        help="Maximum price filter"
+    )
+    
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=1.0,
+        help="Delay between requests in seconds (default: 1.0)"
+    )
+    
+    parser.add_argument(
+        "--fields",
+        nargs="+",
+        choices=[
+            "Product ID", "Title", "Sale Price", "Original Price", "Discount (%)",
+            "Currency", "Rating", "Orders Count", "Store Name", "Store ID", 
+            "Store URL", "Product URL", "Image URL", "Brand"
+        ],
+        default=[
+            "Product ID", "Title", "Sale Price", "Original Price", "Discount (%)",
+            "Currency", "Rating", "Orders Count", "Store Name", "Store ID", 
+            "Store URL", "Product URL", "Image URL", "Brand"
+        ],
+        help="Fields to extract (default: all fields)"
+    )
+    
+    parser.add_argument(
+        "--proxy-provider",
+        choices=["oxylabs", "massive"],
+        default="",
+        help="Proxy provider to use (default: None)",
+    )
+    
+    return parser
 
-    if not search_keyword_input:
-        print("Error: No search product provided. Exiting.")
+
+def main():
+    """Main CLI entry point."""
+    parser = create_parser()
+    args = parser.parse_args()
+    
+    # Validate price range
+    if args.min_price is not None and args.max_price is not None:
+        if args.min_price > args.max_price:
+            parser.error("--min-price cannot be greater than --max-price")
+    
+    print(f"🔍 Starting AliExpress scraper for: '{args.keyword}'")
+    print(f"📦 Brand: {args.brand}")
+    print(f"📄 Pages to scrape: {args.pages}")
+    
+    if args.proxy_provider:
+        print(f"🌐 Proxy provider: {args.proxy_provider}")
     else:
-        num_pages_to_scrape = 0
-        while True:
-            try:
-                num_pages_input = input(
-                    "Enter the number of pages to scrape (1-60): "
-                ).strip()
-                if not num_pages_input.isdigit():
-                    print("Invalid input. Please enter a number.")
-                    continue
-
-                num_pages_to_scrape = int(num_pages_input)
-                if 1 <= num_pages_to_scrape <= 60:
-                    break
-                else:
-                    print("Invalid number. Please enter a number between 1 and 60.")
-            except ValueError:
-                print("Invalid input. Please enter a number.")
-
-        fresh_cookies, fresh_user_agent = initialize_session_data(search_keyword_input)
+        print("🌐 Proxy provider: None (direct connection)")
+    
+    if args.discount:
+        print("💰 Big Sale discount filter: ON")
+    if args.free_shipping:
+        print("🚚 Free shipping filter: ON")
+    if args.min_price is not None:
+        print(f"💵 Min price: ${args.min_price}")
+    if args.max_price is not None:
+        print(f"💵 Max price: ${args.max_price}")
+    
+    print("=" * 50)
+    
+    try:
+        # Validate proxy credentials if proxy provider is specified
+        if args.proxy_provider:
+            validate_proxy_credentials(args.proxy_provider)
+        
+        # Initialize session
+        fresh_cookies, fresh_user_agent = initialize_session_data(args.keyword, args.proxy_provider)
+        
+        # Scrape data
         raw_products, session = scrape_aliexpress_data(
-            search_keyword_input, num_pages_to_scrape, fresh_cookies, fresh_user_agent
+            keyword=args.keyword,
+            max_pages=args.pages,
+            cookies=fresh_cookies,
+            user_agent=fresh_user_agent,
+            proxy_provider=args.proxy_provider,
+            apply_discount_filter=args.discount,
+            apply_free_shipping_filter=args.free_shipping,
+            min_price=args.min_price,
+            max_price=args.max_price,
+            delay=args.delay,
         )
-        all_fields_for_direct_run = [
-            "Product ID",
-            "Title",
-            "Sale Price",
-            "Original Price",
-            "Discount (%)",
-            "Currency",
-            "Rating",
-            "Orders Count",
-            "Store Name",
-            "Store ID",
-            "Store URL",
-            "Product URL",
-            "Image URL",
-        ]
-
-        # Enable store info fetching for direct run
+        
+        # Check if store information is requested
         store_fields_requested = any(
-            field in all_fields_for_direct_run
+            field in args.fields
             for field in ["Store Name", "Store ID", "Store URL"]
         )
-
+        
+        if store_fields_requested:
+            print("🏪 Store information requested - fetching store details...")
+        
+        # Extract product details
         extracted_products = extract_product_details(
             raw_products,
-            all_fields_for_direct_run,
+            args.fields,
+            args.brand,
+            args.proxy_provider,
             session=session,
             fetch_store_info=store_fields_requested,
         )
-        save_results(
-            search_keyword_input, extracted_products, all_fields_for_direct_run
+        
+        # Save results
+        json_file, csv_file = save_results(
+            args.keyword, extracted_products, args.fields
         )
-        print("\nScript finished.")
+        
+        print("\n✅ Scraping completed successfully!")
+        print(f"📊 Total products extracted: {len(extracted_products)}")
+        if json_file:
+            print(f"💾 JSON file: {json_file}")
+        if csv_file:
+            print(f"📋 CSV file: {csv_file}")
+            
+    except KeyboardInterrupt:
+        print("\n⚠️ Scraping interrupted by user")
+    except Exception as e:
+        print(f"\n❌ Error during scraping: {e}")
+        raise
+
+
+if __name__ == "__main__":
+    main()
