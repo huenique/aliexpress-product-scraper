@@ -15,7 +15,9 @@ A powerful command-line tool for scraping product data from AliExpress using the
   - Sequential request processing to avoid overwhelming the server
   - Session caching to minimize browser automation
 - 🌐 **Optional Proxy Support**: Oxylabs proxy integration for enhanced reliability
-- 📊 **Flexible Data Export**:
+- � **Intelligent Store Retry**: Automatic retry mechanism for missing store information
+- 🏪 **Enhanced Store Data**: Advanced store information extraction with fallback strategies
+- �📊 **Flexible Data Export**:
   - JSON format for full data preservation
   - CSV format for easy spreadsheet import
 - 🎯 **Customizable Fields**: Select exactly which product details to extract
@@ -88,6 +90,21 @@ A powerful command-line tool for scraping product data from AliExpress using the
 
 ## Usage
 
+### Enhanced Scraper with Auto-Retry
+
+The project includes an enhanced scraper (`enhanced_scraper.py`) with intelligent retry capabilities for missing store information:
+
+```bash
+# Enhanced scraper with automatic store retry
+python enhanced_scraper.py --keyword "gaming mouse" --brand "Logitech" --enable-store-retry
+
+# Configure retry settings
+python enhanced_scraper.py --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 10 --store-retry-delay 2.0
+
+# Use proxy with enhanced scraper for best results
+python enhanced_scraper.py --keyword "mechanical keyboard" --brand "Razer" --proxy-provider oxylabs --enable-store-retry
+```
+
 ### Basic Usage
 
 ```bash
@@ -112,6 +129,8 @@ python scraper.py --keyword "phone case" --brand "Spigen" --min-price 10 --max-p
 
 ### Command-Line Options
 
+#### Standard Scraper (`scraper.py`)
+
 ```text
 Required arguments:
   --keyword, -k         Product keyword to search for on AliExpress
@@ -128,11 +147,32 @@ Optional arguments:
   --proxy-provider    Proxy provider to use: oxylabs, massive (default: None)
 ```
 
+#### Enhanced Scraper (`enhanced_scraper.py`)
+
+```text
+All standard scraper options plus:
+
+Store Retry Options:
+  --enable-store-retry        Enable automatic retry for missing store information
+  --store-retry-batch-size    Batch size for store retry processing (default: 5)
+  --store-retry-delay         Delay between retry batches in seconds (default: 1.0)
+
+Captcha Handling:
+  --enable-captcha-solver     Enable automatic captcha solving (experimental)
+  --captcha-service          Captcha solving service to use (default: 2captcha)
+```
+
 ### Examples
 
 ```bash
 # Basic scraping
 python scraper.py --keyword "lego batman" --brand "LEGO" --pages 3
+
+# Enhanced scraper with store retry
+python enhanced_scraper.py --keyword "gaming mouse" --brand "Razer" --pages 5 --enable-store-retry --proxy-provider oxylabs
+
+# Configure retry behavior
+python enhanced_scraper.py --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 8 --store-retry-delay 1.5
 
 # With proxy and filters
 python scraper.py --keyword "gaming mouse" --brand "Razer" --pages 5 --discount --free-shipping --proxy-provider oxylabs
@@ -145,6 +185,38 @@ Results will be saved in the `results` folder as:
 
 - `aliexpress_[keyword]_extracted.json`
 - `aliexpress_[keyword]_extracted.csv`
+
+## Store Information Extraction
+
+The scraper includes advanced store information extraction capabilities:
+
+### Store Scraper Architecture
+
+- **Dependency Injection Framework**: Flexible architecture supporting multiple scraper implementations
+- **MCP Playwright Integration**: VS Code optimized scraper using MCP browser functions
+- **Traditional Playwright Support**: Universal scraper for any Python environment
+- **Automatic Fallback**: Intelligent fallback between scraping methods
+- **Batch Processing**: Efficient concurrent processing with configurable limits
+
+### Store Retry System
+
+When `--enable-store-retry` is used, the enhanced scraper will:
+
+1. **Analyze Results**: Identify products with missing store information
+2. **Batch Retry**: Process failed URLs in configurable batches
+3. **Silent Operation**: Retry happens in background without interrupting main scraping
+4. **Update Results**: Seamlessly merge retry results back into the dataset
+5. **Metadata Tracking**: Add retry information for debugging and monitoring
+
+### Store Data Fields
+
+When proxy is configured and store extraction succeeds:
+
+- **Store Name**: Official store name on AliExpress
+- **Store ID**: Unique store identifier
+- **Store URL**: Direct link to the store page
+- **Extraction Method**: Which scraper method was used
+- **Retry Information**: Metadata about retry attempts (when applicable)
 
 ## Data Transformation
 
@@ -219,27 +291,38 @@ The scraper can extract the following product information:
 
 ## Best Practices
 
-1. **Request Delay**:
+1. **Choosing the Right Scraper**:
+   - Use `scraper.py` for basic, fast scraping
+   - Use `enhanced_scraper.py` for maximum store data completeness
+   - Enable `--enable-store-retry` when store information is critical
+
+2. **Store Information Extraction**:
+   - Always use proxy provider for best store data results
+   - Configure appropriate retry batch sizes (5-10) for balance of speed and reliability
+   - Set retry delays (1-2 seconds) to avoid overwhelming servers
+
+3. **Request Delay**:
+4. **Request Delay**:
    - Default: 1 second between requests
    - Lower values (0.2-0.5s) may work but risk temporary IP blocks
    - Adjust based on your needs and risk tolerance
 
-2. **Page Count**:
+5. **Page Count**:
    - Maximum: 60 pages per search
    - Recommended: Start with fewer pages to test
    - Use filters to get more relevant results
 
-3. **Proxy Usage**:
+6. **Proxy Usage**:
    - Optional but recommended for store information extraction
    - Required credentials in `.env` file when using `--proxy-provider`
    - Helps avoid rate limiting and IP blocks
 
-4. **Session Management**:
+7. **Session Management**:
    - Session data is cached for 30 minutes
    - Clear browser cookies if you encounter issues
    - Let the automated browser handle cookie collection
 
-5. **Field Selection**:
+8. **Field Selection**:
    - Use `--fields` to extract only needed data for faster processing
    - Omit `--fields` to get all available fields
    - Store fields require proxy provider to be populated
