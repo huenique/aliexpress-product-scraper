@@ -545,7 +545,9 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(
             description="Enhanced AliExpress Scraper with Captcha Solving"
         )
-        parser.add_argument("keyword", help="Search keyword")
+        parser.add_argument(
+            "--keyword", "-k", required=True, help="Search keyword"
+        )
         parser.add_argument(
             "--brand", "-b", required=True, help="Brand name to associate with products"
         )
