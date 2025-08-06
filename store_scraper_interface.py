@@ -11,7 +11,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Type
+from typing import Any, Callable, Set, Type
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,13 +33,13 @@ class StoreInfo:
 
     def __init__(
         self,
-        store_name: Optional[str] = None,
-        store_id: Optional[str] = None,
-        store_url: Optional[str] = None,
-        source_url: Optional[str] = None,
-        extraction_method: Optional[str] = None,
-        error: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        store_name: str | None = None,
+        store_id: str | None = None,
+        store_url: str | None = None,
+        source_url: str | None = None,
+        extraction_method: str | None = None,
+        error: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         self.store_name = store_name
         self.store_id = store_id
@@ -49,7 +49,7 @@ class StoreInfo:
         self.error = error
         self.metadata = metadata or {}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary format"""
         return {
             "store_name": self.store_name,
@@ -62,7 +62,7 @@ class StoreInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "StoreInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "StoreInfo":
         """Create from dictionary"""
         return cls(
             store_name=data.get("store_name"),
@@ -102,13 +102,13 @@ class StoreScraperInterface(ABC):
 
     @abstractmethod
     async def scrape_multiple_stores(
-        self, product_urls: List[str], **kwargs: Any
-    ) -> Dict[str, StoreInfo]:
+        self, product_urls: list[str], **kwargs: Any
+    ) -> dict[str, StoreInfo]:
         """
         Scrape store information from multiple product URLs
 
         Args:
-            product_urls: List of product URLs
+            product_urls: list of product URLs
             **kwargs: Additional scraper-specific parameters
 
         Returns:
@@ -117,7 +117,7 @@ class StoreScraperInterface(ABC):
         pass
 
     @abstractmethod
-    def get_scraper_info(self) -> Dict[str, Any]:
+    def get_scraper_info(self) -> dict[str, Any]:
         """
         Get information about this scraper implementation
 
@@ -143,8 +143,8 @@ class StoreScraperRegistry:
     """Registry for store scraper implementations"""
 
     def __init__(self):
-        self._scrapers: Dict[StoreScrapingMethod, Type[StoreScraperInterface]] = {}
-        self._instances: Dict[StoreScrapingMethod, StoreScraperInterface] = {}
+        self._scrapers: dict[StoreScrapingMethod, Type[StoreScraperInterface]] = {}
+        self._instances: dict[StoreScrapingMethod, StoreScraperInterface] = {}
 
     def register(
         self, method: StoreScrapingMethod, scraper_class: Type[StoreScraperInterface]
@@ -167,8 +167,8 @@ class StoreScraperRegistry:
 
         return self._instances[method]
 
-    def list_available_methods(self) -> List[StoreScrapingMethod]:
-        """List all registered scraping methods"""
+    def list_available_methods(self) -> list[StoreScrapingMethod]:
+        """list all registered scraping methods"""
         return list(self._scrapers.keys())
 
     def clear_instances(self) -> None:
@@ -181,16 +181,16 @@ class StoreScraperManager:
     Manager class for orchestrating store scraping with fallback strategies
     """
 
-    def __init__(self, registry: Optional[StoreScraperRegistry] = None):
+    def __init__(self, registry: StoreScraperRegistry | None = None):
         self.registry = registry or StoreScraperRegistry()
-        self.fallback_chain: List[StoreScrapingMethod] = []
-        self.default_method: Optional[StoreScrapingMethod] = None
+        self.fallback_chain: list[StoreScrapingMethod] = []
+        self.default_method: StoreScrapingMethod | None = None
 
     def set_default_method(self, method: StoreScrapingMethod) -> None:
         """Set the default scraping method"""
         self.default_method = method
 
-    def set_fallback_chain(self, methods: List[StoreScrapingMethod]) -> None:
+    def set_fallback_chain(self, methods: list[StoreScrapingMethod]) -> None:
         """
         Set the fallback chain - methods will be tried in order if previous ones fail
         """
@@ -199,13 +199,13 @@ class StoreScraperManager:
     async def scrape_store_with_fallback(
         self,
         product_url: str,
-        preferred_method: Optional[StoreScrapingMethod] = None,
+        preferred_method: StoreScrapingMethod | None = None,
         **kwargs: Any,
     ) -> StoreInfo:
         """
         Scrape store info with automatic fallback to other methods if primary fails
         """
-        methods_to_try: List[StoreScrapingMethod] = []
+        methods_to_try: list[StoreScrapingMethod] = []
 
         # Add preferred method first
         if preferred_method:
@@ -218,7 +218,7 @@ class StoreScraperManager:
 
         # Remove duplicates while preserving order
         seen: Set[StoreScrapingMethod] = set()
-        unique_methods: List[StoreScrapingMethod] = []
+        unique_methods: list[StoreScrapingMethod] = []
         for method in methods_to_try:
             if method not in seen:
                 unique_methods.append(method)
@@ -258,10 +258,10 @@ class StoreScraperManager:
 
     async def scrape_multiple_stores_with_fallback(
         self,
-        product_urls: List[str],
-        preferred_method: Optional[StoreScrapingMethod] = None,
+        product_urls: list[str],
+        preferred_method: StoreScrapingMethod | None = None,
         **kwargs: Any,
-    ) -> Dict[str, StoreInfo]:
+    ) -> dict[str, StoreInfo]:
         """
         Scrape multiple stores with fallback, optimizing for batch processing when possible
         """
@@ -285,7 +285,7 @@ class StoreScraperManager:
         logger.info(
             f"Using individual scraping with fallback for {len(product_urls)} URLs"
         )
-        results: Dict[str, StoreInfo] = {}
+        results: dict[str, StoreInfo] = {}
 
         # Process URLs concurrently but with limits to avoid overwhelming
         semaphore = asyncio.Semaphore(3)  # Limit concurrent requests
@@ -341,7 +341,7 @@ def register_store_scraper(
 
 # Convenience functions for easy integration
 async def scrape_store_info(
-    product_url: str, method: Optional[StoreScrapingMethod] = None, **kwargs: Any
+    product_url: str, method: StoreScrapingMethod | None = None, **kwargs: Any
 ) -> StoreInfo:
     """
     Convenience function to scrape store info from a single URL
@@ -352,8 +352,8 @@ async def scrape_store_info(
 
 
 async def scrape_multiple_store_info(
-    product_urls: List[str], method: Optional[StoreScrapingMethod] = None, **kwargs: Any
-) -> Dict[str, StoreInfo]:
+    product_urls: list[str], method: StoreScrapingMethod | None = None, **kwargs: Any
+) -> dict[str, StoreInfo]:
     """
     Convenience function to scrape store info from multiple URLs
     """
@@ -375,27 +375,3 @@ def setup_default_fallback_chain() -> None:
 
     store_scraper_manager.set_fallback_chain(fallback_methods)
     store_scraper_manager.set_default_method(StoreScrapingMethod.MCP_PLAYWRIGHT)
-
-
-if __name__ == "__main__":
-    # Example usage and testing
-    async def example_usage():
-        print("Store Scraper Interface Example")
-        print("=" * 40)
-
-        # Setup default configuration
-        setup_default_fallback_chain()
-
-        print(
-            f"Available methods: {[m.value for m in store_scraper_registry.list_available_methods()]}"
-        )
-        print(
-            f"Fallback chain: {[m.value for m in store_scraper_manager.fallback_chain]}"
-        )
-
-        # This would work once scrapers are registered
-        # test_url = "https://www.aliexpress.com/item/3256809329880105.html"
-        # result = await scrape_store_info(test_url)
-        # print(f"Result: {result}")
-
-    asyncio.run(example_usage())

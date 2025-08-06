@@ -10,7 +10,7 @@ seamless backwards compatibility while adding new capabilities.
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 # Import implementations to register them
 # These imports are required for the decorators to execute and register the scrapers
@@ -35,9 +35,9 @@ class EnhancedStoreInfoIntegration:
 
     def __init__(
         self,
-        preferred_method: Optional[StoreScrapingMethod] = None,
+        preferred_method: StoreScrapingMethod | None = None,
         proxy_provider: str = "",
-        log_callback: Optional[Callable[[str], None]] = None,
+        log_callback: Callable[[str], None] | None = None,
     ):
         """
         Initialize the enhanced store info integration
@@ -61,9 +61,9 @@ class EnhancedStoreInfoIntegration:
         """Default logging function"""
         logger.debug(message)
 
-    def _get_proxy_config(self) -> Dict[str, Any]:
+    def _get_proxy_config(self) -> dict[str, Any]:
         """Get proxy configuration"""
-        config: Dict[str, Any] = {}
+        config: dict[str, Any] = {}
 
         if self.proxy_provider == "oxylabs":
             import os
@@ -85,8 +85,8 @@ class EnhancedStoreInfoIntegration:
         return config
 
     async def fetch_store_info_enhanced(
-        self, product_urls: List[str], **kwargs: Any
-    ) -> Dict[str, Dict[str, Optional[str]]]:
+        self, product_urls: list[str], **kwargs: Any
+    ) -> dict[str, dict[str, str | None]]:
         """
         Enhanced store info fetching using the new framework.
 
@@ -94,7 +94,7 @@ class EnhancedStoreInfoIntegration:
         with support for multiple scraping methods and automatic fallbacks.
 
         Args:
-            product_urls: List of product URLs to scrape
+            product_urls: list of product URLs to scrape
             **kwargs: Additional configuration options
 
         Returns:
@@ -117,7 +117,7 @@ class EnhancedStoreInfoIntegration:
             )
 
             # Convert to the format expected by existing code
-            legacy_format_results: Dict[str, Dict[str, Optional[str]]] = {}
+            legacy_format_results: dict[str, dict[str, str | None]] = {}
 
             for url, store_info in store_results.items():
                 legacy_format_results[url] = {
@@ -147,7 +147,7 @@ class EnhancedStoreInfoIntegration:
 
     async def fetch_single_store_info(
         self, product_url: str, **kwargs: Any
-    ) -> Dict[str, Optional[str]]:
+    ) -> dict[str, str | None]:
         """
         Fetch store info for a single product URL
 
@@ -165,11 +165,11 @@ class EnhancedStoreInfoIntegration:
 
 
 # Global integration instance
-_store_integration: Optional[EnhancedStoreInfoIntegration] = None
+_store_integration: EnhancedStoreInfoIntegration | None = None
 
 
 def get_store_integration(
-    proxy_provider: str = "", log_callback: Optional[Callable[[str], None]] = None
+    proxy_provider: str = "", log_callback: Callable[[str], None] | None = None
 ) -> EnhancedStoreInfoIntegration:
     """
     Get or create the global store integration instance
@@ -229,12 +229,12 @@ def enhance_existing_scraper_with_store_integration():
             integration_instance: "EnhancedStoreInfoIntegration",
         ) -> Callable[..., Any]:
             def async_fetch_store_info_batch(
-                product_ids: List[str],
+                product_ids: list[str],
                 session: Any,
                 proxy_provider: str = "",
                 log_callback: Callable[[str], None] = scraper.default_logger,
                 max_workers: int = 3,
-            ) -> Dict[str, Dict[str, Optional[str]]]:
+            ) -> dict[str, dict[str, str | None]]:
                 """
                 Enhanced replacement for fetch_store_info_batch that uses async methods
                 """
@@ -285,7 +285,7 @@ def enhance_existing_scraper_with_store_integration():
                     )
 
                 # Convert URL-based results back to product ID-based results
-                final_results: Dict[str, Dict[str, Any]] = {}
+                final_results: dict[str, dict[str, Any]] = {}
                 for i, product_id in enumerate(product_ids):
                     if i < len(product_urls):
                         url = product_urls[i]
@@ -325,28 +325,28 @@ def enhance_existing_scraper_with_store_integration():
 
 # Convenience functions for direct usage
 async def scrape_stores_for_products(
-    products: List[Dict[str, Any]],
+    products: list[dict[str, Any]],
     url_field: str = "url",
     proxy_provider: str = "",
     **kwargs: Any,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Scrape store information for a list of products and enhance them
 
     Args:
-        products: List of product dictionaries
+        products: list of product dictionaries
         url_field: Field name containing the product URL
         proxy_provider: Proxy provider to use
         **kwargs: Additional scraping parameters
 
     Returns:
-        List of products enhanced with store information
+        list of products enhanced with store information
     """
     if not products:
         return []
 
     # Extract URLs
-    product_urls: List[str] = []
+    product_urls: list[str] = []
     for product in products:
         url = product.get(url_field)
         if url:
@@ -363,7 +363,7 @@ async def scrape_stores_for_products(
     store_results = await integration.fetch_store_info_enhanced(product_urls, **kwargs)
 
     # Enhance products with store information
-    enhanced_products: List[Dict[str, Any]] = []
+    enhanced_products: list[dict[str, Any]] = []
     for product in products:
         enhanced_product = product.copy()
         url = product.get(url_field)
@@ -400,12 +400,12 @@ def configure_store_scraping_method(method: StoreScrapingMethod) -> None:
     print(f"✅ Configured default store scraping method: {method.value}")
 
 
-def list_available_store_methods() -> List[str]:
+def list_available_store_methods() -> list[str]:
     """
-    List all available store scraping methods
+    list all available store scraping methods
 
     Returns:
-        List of available method names
+        list of available method names
     """
     from store_scraper_interface import store_scraper_registry
 
@@ -414,22 +414,22 @@ def list_available_store_methods() -> List[str]:
 
 
 def retry_missing_store_info(
-    products: List[Dict[str, Any]],
+    products: list[dict[str, Any]],
     proxy_provider: str = "",
     batch_size: int = 5,
     delay: float = 2.0,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Simple function to retry missing store information for products
 
     Args:
-        products: List of product dictionaries
+        products: list of product dictionaries
         proxy_provider: Proxy provider to use
         batch_size: Batch size for processing
         delay: Delay between batches
 
     Returns:
-        List of products with updated store information
+        list of products with updated store information
     """
     import asyncio
 
@@ -437,7 +437,7 @@ def retry_missing_store_info(
 
     async def _async_retry():
         # Find products with missing store info
-        missing_products: List[Dict[str, Any]] = []
+        missing_products: list[dict[str, Any]] = []
         for product in products:
             store_name = product.get("Store Name")
             product_url = product.get("Product URL")
@@ -451,7 +451,7 @@ def retry_missing_store_info(
             return products
 
         # Extract URLs for retry with explicit typing
-        urls_to_retry: List[str] = [
+        urls_to_retry: list[str] = [
             p["Product URL"] for p in missing_products if p.get("Product URL")
         ]
 
@@ -462,10 +462,10 @@ def retry_missing_store_info(
         integration = get_store_integration(proxy_provider=proxy_provider)
 
         # Process in batches
-        all_retry_results: Dict[str, Any] = {}
+        all_retry_results: dict[str, Any] = {}
 
         for i in range(0, len(urls_to_retry), batch_size):
-            batch_urls: List[str] = urls_to_retry[i : i + batch_size]
+            batch_urls: list[str] = urls_to_retry[i : i + batch_size]
 
             try:
                 batch_results = await integration.fetch_store_info_enhanced(batch_urls)
@@ -478,13 +478,13 @@ def retry_missing_store_info(
                 await asyncio.sleep(delay)
 
         # Update products with retry results
-        updated_products: List[Dict[str, Any]] = []
+        updated_products: list[dict[str, Any]] = []
 
         for product in products:
             product_url = product.get("Product URL")
 
             if product_url in all_retry_results:
-                store_info: Dict[str, Any] = all_retry_results[product_url]
+                store_info: dict[str, Any] = all_retry_results[product_url]
                 updated_product = product.copy()
 
                 if store_info.get("store_name"):
@@ -537,58 +537,3 @@ try:
     enhance_existing_scraper_with_store_integration()
 except Exception as e:
     logger.warning(f"Could not auto-apply store integration: {e}")
-
-
-if __name__ == "__main__":
-    # Test the integration
-    async def test_integration():
-        print("🧪 Testing Enhanced Store Scraper Integration")
-        print("=" * 60)
-
-        # List available methods
-        methods = list_available_store_methods()
-        print(f"📋 Available scraping methods: {methods}")
-
-        # Test with sample products
-        test_products = [
-            {
-                "title": "Logitech G Pro X Superlight Wireless Gaming Mouse",
-                "url": "https://www.aliexpress.com/item/3256809329880105.html",
-                "price": "$89.99",
-            },
-            {
-                "title": "Test Product 2",
-                "url": "https://www.aliexpress.com/item/1234567890.html",
-                "price": "$49.99",
-            },
-        ]
-
-        # Configure method (this would normally detect automatically)
-        try:
-            configure_store_scraping_method(StoreScrapingMethod.MCP_PLAYWRIGHT)
-        except:
-            configure_store_scraping_method(StoreScrapingMethod.TRADITIONAL_PLAYWRIGHT)
-
-        # Enhance products with store information
-        try:
-            enhanced_products = await scrape_stores_for_products(
-                test_products,
-                proxy_provider="",  # Change to "oxylabs" if you have credentials
-                batch_size=2,
-            )
-
-            print(f"✅ Enhanced {len(enhanced_products)} products:")
-            for product in enhanced_products:
-                print(f"  - {product.get('title', 'Unknown')}")
-                print(f"    Store: {product.get('store_name', 'Not found')}")
-                print(f"    Store ID: {product.get('store_id', 'Not found')}")
-                print()
-
-        except Exception as e:
-            print(f"❌ Test failed: {e}")
-            import traceback
-
-            traceback.print_exc()
-
-    # Run test
-    asyncio.run(test_integration())

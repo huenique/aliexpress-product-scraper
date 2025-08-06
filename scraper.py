@@ -7,7 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
-from typing import Any, Callable, Dict, Generator, List
+from typing import Any, Callable, Generator
 from urllib.parse import quote_plus
 
 import requests
@@ -168,9 +168,16 @@ def initialize_session_data(
 
         context = browser.new_context(**context_options)
 
-        # Block CSS and images for faster loading
+        # Block CSS and images for faster loading - track bandwidth savings
+        blocked_requests = 0
+        total_requests = 0
+
         def handle_route(route: Route) -> None:
+            nonlocal blocked_requests, total_requests
+            total_requests += 1
+
             if route.request.resource_type in ["stylesheet", "image", "font", "media"]:
+                blocked_requests += 1
                 route.abort()
             else:
                 route.continue_()
@@ -203,6 +210,14 @@ def initialize_session_data(
 
         log_callback(f"Using User-Agent: {fresh_user_agent}")
         log_callback(f"Extracted {len(fresh_cookies)} cookies.")
+
+        # Print bandwidth optimization stats
+        if total_requests > 0:
+            bandwidth_saved_percent = (blocked_requests / total_requests) * 100
+            log_callback(
+                f"📊 Bandwidth optimization: {blocked_requests}/{total_requests} "
+                f"requests blocked ({bandwidth_saved_percent:.1f}% savings)"
+            )
 
         cache_content: dict[str, Any] = {
             "timestamp": time.time(),
@@ -1361,7 +1376,7 @@ async def auto_retry_store_info(
         from store_integration import get_store_integration
 
         # Find products with missing store info
-        missing_products: List[Dict[str, Any]] = []
+        missing_products: list[dict[str, Any]] = []
         for product in products:
             store_name = product.get("Store Name")
             store_id = product.get("Store ID")
@@ -1384,7 +1399,7 @@ async def auto_retry_store_info(
             return
 
         # Extract URLs for retry with explicit typing
-        urls_to_retry: List[str] = [
+        urls_to_retry: list[str] = [
             p["Product URL"] for p in missing_products if p.get("Product URL")
         ]
 
@@ -1395,10 +1410,10 @@ async def auto_retry_store_info(
         integration = get_store_integration(proxy_provider=proxy_provider)
 
         # Process in batches
-        all_retry_results: Dict[str, Any] = {}
+        all_retry_results: dict[str, Any] = {}
 
         for i in range(0, len(urls_to_retry), batch_size):
-            batch_urls: List[str] = urls_to_retry[i : i + batch_size]
+            batch_urls: list[str] = urls_to_retry[i : i + batch_size]
 
             try:
                 batch_results = await integration.fetch_store_info_enhanced(batch_urls)
@@ -1414,14 +1429,14 @@ async def auto_retry_store_info(
                 await asyncio.sleep(delay)
 
         # Update products with retry results
-        updated_products: List[Dict[str, Any]] = []
+        updated_products: list[dict[str, Any]] = []
         successful_updates = 0
 
         for product in products:
             product_url = product.get("Product URL")
 
             if product_url in all_retry_results:
-                store_info: Dict[str, Any] = all_retry_results[product_url]
+                store_info: dict[str, Any] = all_retry_results[product_url]
 
                 updated_product = product.copy()
                 updated = False

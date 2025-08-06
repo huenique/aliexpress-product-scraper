@@ -9,7 +9,7 @@ for environments where MCP Playwright is not available.
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
@@ -39,6 +39,8 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
         extraction_timeout: int = 10,
         navigation_timeout: int = 30,
         retry_attempts: int = 3,
+        optimize_bandwidth: bool = True,
+        track_bandwidth_savings: bool = False,
         **kwargs: Any,
     ):
         """
@@ -50,6 +52,8 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
             extraction_timeout: Timeout for store data extraction (seconds)
             navigation_timeout: Timeout for page navigation (seconds)
             retry_attempts: Number of retry attempts for failed extractions
+            optimize_bandwidth: Whether to enable bandwidth optimization (block CSS, images, etc.)
+            track_bandwidth_savings: Whether to track and log bandwidth savings statistics
             **kwargs: Additional configuration options
         """
         self.use_oxylabs_proxy = use_oxylabs_proxy
@@ -57,12 +61,18 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
         self.extraction_timeout = extraction_timeout
         self.navigation_timeout = navigation_timeout
         self.retry_attempts = retry_attempts
+        self.optimize_bandwidth = optimize_bandwidth
+        self.track_bandwidth_savings = track_bandwidth_savings
         self.config = kwargs
 
         # Browser instances for reuse
         self._playwright = None
-        self._browser: Optional[Browser] = None
-        self._context: Optional[BrowserContext] = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+
+        # Bandwidth tracking
+        self._total_requests = 0
+        self._blocked_requests = 0
 
     @property
     def method_name(self) -> StoreScrapingMethod:
@@ -74,19 +84,38 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
         """Traditional Playwright supports efficient batch processing"""
         return True
 
-    def get_scraper_info(self) -> Dict[str, Any]:
+    def get_scraper_info(self) -> dict[str, Any]:
         """Get scraper information"""
-        return {
+        scraper_info: dict[str, Any] = {
             "method": self.method_name.value,
-            "description": "Traditional Playwright store scraper",
+            "description": "Traditional Playwright store scraper with bandwidth optimization",
             "supports_batch": self.supports_batch_processing,
             "proxy_enabled": self.use_oxylabs_proxy,
             "headless": self.headless,
             "extraction_timeout": self.extraction_timeout,
             "navigation_timeout": self.navigation_timeout,
             "retry_attempts": self.retry_attempts,
+            "optimize_bandwidth": self.optimize_bandwidth,
+            "track_bandwidth_savings": self.track_bandwidth_savings,
             "config": self.config,
         }
+
+        # Add bandwidth savings statistics if tracking is enabled
+        if self.track_bandwidth_savings and self._total_requests > 0:
+            bandwidth_saved_percent = (
+                self._blocked_requests / self._total_requests
+            ) * 100
+            scraper_info.update(
+                {
+                    "bandwidth_stats": {
+                        "total_requests": self._total_requests,
+                        "blocked_requests": self._blocked_requests,
+                        "bandwidth_saved_percent": round(bandwidth_saved_percent, 1),
+                    }
+                }
+            )
+
+        return scraper_info
 
     async def _initialize_browser(self) -> None:
         """Initialize browser and context"""
@@ -96,11 +125,8 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
         if not self._browser:
             self._playwright = await async_playwright().start()
 
+            # Optimized browser arguments for store scraping with bandwidth optimization
             browser_args = [
-                "--disable-images",
-                "--disable-css",
-                "--disable-plugins",
-                "--disable-extensions",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-background-networking",
@@ -108,6 +134,8 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
                 "--disable-renderer-backgrounding",
                 "--disable-blink-features=AutomationControlled",
                 "--excludeSwitches=enable-automation",
+                "--disable-web-security",  # Help with CORS issues
+                "--disable-features=VizDisplayCompositor",
             ]
 
             self._browser = await self._playwright.chromium.launch(
@@ -115,7 +143,7 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
             )
 
             # Configure context with proxy if needed
-            context_options: Dict[str, Any] = {
+            context_options: dict[str, Any] = {
                 "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
                 "java_script_enabled": True,
                 "ignore_https_errors": True,
@@ -141,18 +169,103 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
 
             self._context = await self._browser.new_context(**context_options)
 
-            # Block images and CSS for faster loading
-            await self._context.route("**/*", self._handle_route)
+            # Enhanced bandwidth optimization - block unnecessary resources (if enabled)
+            if self.optimize_bandwidth:
+                await self._context.route("**/*", self._handle_route)
 
     async def _handle_route(self, route: Any, request: Any) -> None:
-        """Handle route to block unnecessary resources"""
-        if request.resource_type in ["image", "stylesheet", "font"]:
+        """
+        Enhanced route handler for bandwidth optimization
+
+        Blocks multiple resource types to reduce bandwidth usage:
+        - CSS stylesheets (for faster loading, content still accessible)
+        - Images (significant bandwidth savings)
+        - Fonts (non-essential for data extraction)
+        - Media files (audio/video)
+        - WebSocket connections (not needed for scraping)
+        - Third-party analytics and ads
+        """
+        # Track total requests if bandwidth tracking is enabled
+        if self.track_bandwidth_savings:
+            self._total_requests += 1
+
+        # Skip blocking if bandwidth optimization is disabled
+        if not self.optimize_bandwidth:
+            await route.continue_()
+            return
+
+        # Resource types to block for bandwidth optimization (your approach)
+        blocked_types = {"stylesheet", "image", "font", "media", "websocket"}
+
+        # Additional patterns for analytics/ads (common third-party domains)
+        blocked_patterns = [
+            "googletagmanager.com",
+            "google-analytics.com",
+            "doubleclick.net",
+            "facebook.com/tr",
+            "adsystem.amazon.com",
+            "googlesyndication.com",
+            "scorecardresearch.com",
+            "outbrain.com",
+            "taboola.com",
+            "mmstat.com",  # AliExpress analytics
+        ]
+
+        should_block = False
+
+        # Check resource type (your approach - this is the core of your bandwidth optimization)
+        if request.resource_type in blocked_types:
+            should_block = True
+
+        # Check URL patterns for analytics/ads
+        elif any(pattern in request.url for pattern in blocked_patterns):
+            should_block = True
+
+        if should_block:
+            if self.track_bandwidth_savings:
+                self._blocked_requests += 1
             await route.abort()
+            # Optional: log blocked resources in debug mode
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    f"🚫 BLOCKED [{request.resource_type}]: {request.url[:100]}..."
+                )
         else:
             await route.continue_()
 
+    def reset_bandwidth_tracking(self) -> None:
+        """Reset bandwidth tracking counters"""
+        self._total_requests = 0
+        self._blocked_requests = 0
+
+    def get_bandwidth_stats(self) -> dict[str, Any]:
+        """Get current bandwidth usage statistics"""
+        if self._total_requests == 0:
+            return {
+                "total_requests": 0,
+                "blocked_requests": 0,
+                "bandwidth_saved_percent": 0.0,
+                "tracking_enabled": self.track_bandwidth_savings,
+            }
+
+        bandwidth_saved_percent = (self._blocked_requests / self._total_requests) * 100
+        return {
+            "total_requests": self._total_requests,
+            "blocked_requests": self._blocked_requests,
+            "bandwidth_saved_percent": round(bandwidth_saved_percent, 1),
+            "tracking_enabled": self.track_bandwidth_savings,
+        }
+
     async def _cleanup_browser(self) -> None:
         """Clean up browser resources"""
+        # Log bandwidth stats before cleanup if tracking is enabled
+        if self.track_bandwidth_savings and self._total_requests > 0:
+            stats = self.get_bandwidth_stats()
+            logger.info(
+                f"📊 Bandwidth savings: {stats['blocked_requests']}/{stats['total_requests']} "
+                f"requests blocked ({stats['bandwidth_saved_percent']}%)"
+            )
+
         if self._context:
             await self._context.close()
             self._context = None
@@ -212,6 +325,14 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
                         f"⚠️ Failed to extract valid store info: {store_info.error}"
                     )
 
+                # Print bandwidth stats for single scrape if tracking is enabled
+                if self.track_bandwidth_savings:
+                    stats = self.get_bandwidth_stats()
+                    logger.info(
+                        f"📊 Single scrape bandwidth: {stats['blocked_requests']}/{stats['total_requests']} "
+                        f"requests blocked ({stats['bandwidth_saved_percent']}% savings)"
+                    )
+
                 return store_info
 
             finally:
@@ -227,8 +348,8 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
             )
 
     async def scrape_multiple_stores(
-        self, product_urls: List[str], **kwargs: Any
-    ) -> Dict[str, StoreInfo]:
+        self, product_urls: list[str], **kwargs: Any
+    ) -> dict[str, StoreInfo]:
         """
         Scrape store information from multiple URLs with batch optimization
         """
@@ -239,7 +360,7 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
             f"🚀 Batch scraping {len(product_urls)} store pages with Traditional Playwright"
         )
 
-        results: Dict[str, StoreInfo] = {}
+        results: dict[str, StoreInfo] = {}
 
         try:
             await self._initialize_browser()
@@ -297,6 +418,14 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
         logger.info(
             f"✅ Batch complete: {successful_count}/{len(product_urls)} successful"
         )
+
+        # Print bandwidth stats if tracking is enabled
+        if self.track_bandwidth_savings:
+            stats = self.get_bandwidth_stats()
+            logger.info(
+                f"📊 Bandwidth stats: {stats['blocked_requests']}/{stats['total_requests']} "
+                f"requests blocked ({stats['bandwidth_saved_percent']}% savings)"
+            )
 
         return results
 
@@ -579,41 +708,3 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
                 error=f"Alternative extraction error: {str(e)}",
                 extraction_method="traditional_playwright_alternative_error",
             )
-
-
-if __name__ == "__main__":
-    # Test the scraper
-    async def test_traditional_scraper():
-        print("🧪 Testing Traditional Playwright Store Scraper")
-        print("=" * 50)
-
-        test_url = "https://www.aliexpress.com/item/3256809329880105.html"
-
-        # Create and test scraper
-        scraper = TraditionalPlaywrightStoreScraper()
-
-        try:
-            # Test single URL scraping
-            result = await scraper.scrape_single_store(test_url)
-            print(f"✅ Single URL result: {result}")
-
-            # Test batch scraping
-            test_urls = [
-                test_url,
-                "https://www.aliexpress.com/item/1234567890.html",
-            ]
-
-            batch_results = await scraper.scrape_multiple_stores(test_urls)
-            print(f"✅ Batch results: {batch_results}")
-
-        except Exception as e:
-            print(f"❌ Test failed: {e}")
-        finally:
-            # Clean up if the scraper has cleanup methods
-            try:
-                if hasattr(scraper, "__aexit__"):
-                    await scraper.__aexit__(None, None, None)  # type: ignore
-            except Exception:
-                pass  # Ignore cleanup errors
-
-    asyncio.run(test_traditional_scraper())
