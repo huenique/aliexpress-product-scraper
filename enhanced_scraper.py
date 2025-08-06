@@ -279,7 +279,7 @@ class EnhancedAliExpressScraper:
                     proxy_provider=self.proxy_provider,
                     session=session,
                     fetch_store_info=True,  # Enable store info fetching
-                    log_callback=lambda msg: self.log_callback(f"🔍 {msg}"),
+                    log_callback=self.log_callback,
                 )
 
                 # Format results to match expected structure
@@ -403,11 +403,6 @@ class EnhancedAliExpressScraper:
                 selected_fields=all_fields,
                 log_callback=self.log_callback,
             )
-
-            if json_file:
-                self.log_callback(f"📄 Results saved to: {json_file}")
-            if csv_file:
-                self.log_callback(f"📊 Results saved to: {csv_file}")
 
             # Add file paths to results
             results["json_file"] = json_file
@@ -624,19 +619,6 @@ if __name__ == "__main__":
                 print(f"📄 JSON saved to: {results['json_file']}")
             if results.get("csv_file"):
                 print(f"📄 CSV saved to: {results['csv_file']}")
-
-            # Print first few products with detailed fields
-            for i, product in enumerate(products[:3], 1):
-                title = product.get("Title", "No title")
-                price = product.get("Sale Price", "No price")
-                store = product.get("Store Name", "Unknown store")
-                rating = product.get("Rating", "No rating")
-                orders = product.get("Orders Count", "No orders data")
-
-                print(f"\n{i}. {title[:60]}...")
-                print(f"   💰 Price: {price}")
-                print(f"   🏪 Store: {store}")
-                print(f"   ⭐ Rating: {rating} | 📦 Orders: {orders}")
 
         else:
             print(f"\n❌ Scraping failed: {results['error']}")
