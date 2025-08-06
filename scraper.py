@@ -66,9 +66,9 @@ def validate_proxy_credentials(proxy_provider: str) -> None:
 
 
 def initialize_session_data(
-    keyword: str, 
+    keyword: str,
     proxy_provider: str = "",
-    log_callback: Callable[[str], None] = default_logger
+    log_callback: Callable[[str], None] = default_logger,
 ) -> tuple[dict[str, Any], str]:
     """
     Checks for cached session data first. If valid cache exists, uses it.
@@ -76,7 +76,7 @@ def initialize_session_data(
     is specified, configures proxy accordingly.
     """
     log_callback(f"Initializing session for product: '{keyword}'")
-    
+
     # Validate proxy credentials if proxy provider is specified
     if proxy_provider:
         validate_proxy_credentials(proxy_provider)
@@ -115,9 +115,7 @@ def initialize_session_data(
             f"Fetching fresh session data using headless browser with {proxy_provider} proxy..."
         )
     else:
-        log_callback(
-            "Fetching fresh session data using headless browser (no proxy)..."
-        )
+        log_callback("Fetching fresh session data using headless browser (no proxy)...")
 
     playwright = None
     browser = None
@@ -161,9 +159,7 @@ def initialize_session_data(
                 "username": OXYLABS_USERNAME,
                 "password": OXYLABS_PASSWORD,
             }
-            log_callback(
-                f"Configured Oxylabs proxy: {OXYLABS_ENDPOINT}"
-            )
+            log_callback(f"Configured Oxylabs proxy: {OXYLABS_ENDPOINT}")
         elif proxy_provider == "massive":
             # Add massive proxy configuration when implemented
             raise NotImplementedError("Massive proxy provider is not yet implemented")
@@ -363,7 +359,7 @@ def scrape_aliexpress_data(
 
             json_data: dict[str, Any] | None = response.json()
 
-            # save the json response to debug/ dir
+            # save the json response to debug/ dir (for debugging only)
             # with open(f"debug/api_response_page_{current_page_num}.json", "w") as f:
             #     json.dump(json_data, f, indent=4)
 
@@ -372,6 +368,21 @@ def scrape_aliexpress_data(
                     f"Unexpected response format for page {current_page_num}. Expected JSON dict."
                 )
                 log_callback(f"Response text sample: {response.text[:200]}")
+                break
+
+            # Check for validation/captcha errors
+            if json_data.get("ret") and "FAIL_SYS_USER_VALIDATE" in json_data.get(
+                "ret", []
+            ):
+                log_callback(
+                    "🚫 AliExpress validation error detected - API access blocked"
+                )
+                log_callback(
+                    "💡 Recommendation: Use 'enhanced_scraper.py' which includes captcha solving capabilities"
+                )
+                log_callback(
+                    "   Example: uv run python enhanced_scraper.py 'mechanical keyboard' --max-pages 1"
+                )
                 break
 
             items_list = (
@@ -439,6 +450,195 @@ def fetch_store_info_batch(
     max_workers: int = 3,
 ) -> dict[str, dict[str, str | None]]:
     """
+    Fetches store information for multiple products.
+    Now attempts to use captcha solver for the first few products when available.
+    """
+    if not product_ids:
+        return {}
+
+    log_callback(
+        f"Fetching store info for {len(product_ids)} products with enhanced captcha handling..."
+    )
+
+    # Try captcha solver for first few products, then fall back to basic method
+    store_results: dict[str, dict[str, str | None]] = {}
+
+    try:
+        # Try captcha solver for first 3 products
+        captcha_products = product_ids[:3]
+        log_callback(
+            f"🛡️ Attempting captcha-enhanced extraction for {len(captcha_products)} products..."
+        )
+
+        for product_id in captcha_products:
+            try:
+                # Use the basic approach but with enhanced error handling
+                store_info = fetch_single_store_with_captcha_fallback(
+                    product_id, proxy_provider, log_callback
+                )
+                store_results[product_id] = store_info
+
+                if store_info.get("store_name"):
+                    log_callback(
+                        f"✅ Store found for {product_id}: {store_info['store_name']}"
+                    )
+                else:
+                    log_callback(f"⚠️ No store info for {product_id}")
+
+            except Exception as e:
+                log_callback(f"❌ Error processing {product_id}: {str(e)}")
+                store_results[product_id] = {
+                    "store_name": None,
+                    "store_id": None,
+                    "store_url": None,
+                }
+
+        log_callback(
+            f"Captcha-enhanced processing complete. Using basic method for remaining products..."
+        )
+
+    except ImportError:
+        log_callback(
+            "⚠️ Captcha solver module not available, using basic method for all products"
+        )
+        captcha_products = []
+    except Exception as e:
+        log_callback(f"❌ Captcha solver error: {str(e)}, falling back to basic method")
+        captcha_products = []
+
+    # Process remaining products with basic method
+    remaining_products = [pid for pid in product_ids if pid not in store_results]
+    if remaining_products:
+        basic_results = fetch_store_info_batch_basic(
+            remaining_products, session, proxy_provider, log_callback, max_workers
+        )
+        store_results.update(basic_results)
+
+    successful_count = sum(
+        1 for result in store_results.values() if result.get("store_name")
+    )
+    log_callback(
+        f"Store info batch fetch complete: {successful_count}/{len(product_ids)} successful"
+    )
+
+    return store_results
+
+
+def fetch_single_store_with_captcha_fallback(
+    product_id: str, proxy_provider: str, log_callback: Callable[[str], None]
+) -> dict[str, str | None]:
+    """
+    Attempt to fetch store info for a single product using requests with enhanced patterns
+    """
+    try:
+        import re
+
+        import requests
+
+        product_url = f"https://www.aliexpress.com/item/{product_id}.html"
+
+        # Enhanced headers to avoid detection
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+        }
+
+        # Create session
+        session = requests.Session()
+        session.headers.update(headers)
+
+        # Configure proxy if available
+        if proxy_provider == "oxylabs" and OXYLABS_USERNAME and OXYLABS_PASSWORD:
+            proxy_auth = f"{OXYLABS_USERNAME}:{OXYLABS_PASSWORD}"
+            proxy_url = f"http://{proxy_auth}@{OXYLABS_ENDPOINT}"
+            session.proxies = {"http": proxy_url, "https": proxy_url}
+
+        # Make request with timeout
+        response = session.get(product_url, timeout=15)
+
+        if response.status_code == 200:
+            html = response.text
+
+            # Check for captcha/bot detection
+            if any(
+                indicator in html.lower()
+                for indicator in ["captcha", "verify", "security check"]
+            ):
+                log_callback(
+                    f"🚨 Captcha detected for {product_id}, extraction may be limited"
+                )
+
+            # Enhanced store extraction patterns
+            store_name = None
+            store_id = None
+            store_url = None
+
+            # Try multiple patterns for store name
+            store_name_patterns = [
+                r'"storeName"\s*:\s*"([^"]+)"',
+                r'"sellerAdminSeq"\s*:\s*"([^"]+)"',
+                r'"shopName"\s*:\s*"([^"]+)"',
+                r'data-spm-anchor-id="[^"]*store[^"]*"[^>]*>([^<]+)',
+                r"store.*?name[^>]*>([^<]+)",
+                r"seller.*?name[^>]*>([^<]+)",
+            ]
+
+            for pattern in store_name_patterns:
+                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                if match:
+                    potential_name = match.group(1).strip()
+                    if (
+                        potential_name
+                        and len(potential_name) > 2
+                        and not potential_name.isdigit()
+                    ):
+                        store_name = potential_name
+                        break
+
+            # Try to find store ID and URL
+            store_link_patterns = [
+                r'href="([^"]*\/store\/(\d+)[^"]*)"',
+                r'"storeUrl"\s*:\s*"([^"]*\/store\/(\d+)[^"]*)"',
+            ]
+
+            for pattern in store_link_patterns:
+                match = re.search(pattern, html)
+                if match:
+                    store_url = match.group(1)
+                    if store_url.startswith("/"):
+                        store_url = f"https://www.aliexpress.com{store_url}"
+                    store_id = match.group(2)
+                    break
+
+            return {
+                "store_name": store_name,
+                "store_id": store_id,
+                "store_url": store_url,
+            }
+        else:
+            log_callback(f"HTTP {response.status_code} for {product_id}")
+            return {"store_name": None, "store_id": None, "store_url": None}
+
+    except Exception as e:
+        log_callback(f"Error fetching store for {product_id}: {str(e)}")
+        return {"store_name": None, "store_id": None, "store_url": None}
+
+
+def fetch_store_info_batch_basic(
+    product_ids: list[str],
+    session: Any,
+    proxy_provider: str = "",
+    log_callback: Callable[[str], None] = default_logger,
+    max_workers: int = 3,
+) -> dict[str, dict[str, str | None]]:
+    """
     Fetches store information for multiple products using a shared browser pool.
     Much faster than fetching one product at a time.
     Returns a dict mapping product_id -> store_info.
@@ -476,7 +676,7 @@ def fetch_store_info_batch(
 
         # Configure proxy settings based on provider
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0"
-        
+
         try:
             if proxy_provider == "oxylabs":
                 log_callback(
@@ -494,7 +694,9 @@ def fetch_store_info_batch(
                 )
             elif proxy_provider == "massive":
                 # Add massive proxy configuration when implemented
-                raise NotImplementedError("Massive proxy provider is not yet implemented")
+                raise NotImplementedError(
+                    "Massive proxy provider is not yet implemented"
+                )
             else:
                 log_callback("No proxy configured for store info fetching")
                 context = browser.new_context(
@@ -529,7 +731,9 @@ def fetch_store_info_batch(
             page = browser_obj["page"]
 
             if proxy_provider:
-                log_callback(f"Navigating to {product_url} with {proxy_provider} proxy...")
+                log_callback(
+                    f"Navigating to {product_url} with {proxy_provider} proxy..."
+                )
             else:
                 log_callback(f"Navigating to {product_url} (no proxy)...")
 
@@ -753,7 +957,9 @@ def fetch_store_info_from_product_page(
         return None
 
     # Use the batch function for single product
-    results = fetch_store_info_batch([product_id], session, proxy_provider, log_callback, max_workers=1)
+    results = fetch_store_info_batch(
+        [product_id], session, proxy_provider, log_callback, max_workers=1
+    )
     return results.get(product_id)
 
 
@@ -1014,86 +1220,102 @@ Examples:
   %(prog)s --keyword "lego batman" --brand "LEGO" --pages 3
   %(prog)s --keyword "gaming mouse" --brand "Razer" --pages 5 --discount --free-shipping --proxy-provider oxylabs
   %(prog)s --keyword "bluetooth headphones" --brand "Sony" --pages 2 --min-price 20 --max-price 100
-        """
+        """,
     )
-    
+
     # Required arguments
     parser.add_argument(
-        "--keyword", "-k",
+        "--keyword",
+        "-k",
         required=True,
-        help="Product keyword to search for on AliExpress"
+        help="Product keyword to search for on AliExpress",
     )
-    
+
     parser.add_argument(
-        "--brand", "-b",
+        "--brand",
+        "-b",
         required=True,
-        help="Brand name to associate with the scraped products"
+        help="Brand name to associate with the scraped products",
     )
-    
+
     # Optional arguments
     parser.add_argument(
-        "--pages", "-p",
+        "--pages",
+        "-p",
         type=int,
         default=1,
         choices=range(1, 61),
         metavar="[1-60]",
-        help="Number of pages to scrape (default: 1, max: 60)"
+        help="Number of pages to scrape (default: 1, max: 60)",
     )
-    
+
     parser.add_argument(
-        "--discount", "-d",
+        "--discount", "-d", action="store_true", help="Apply 'Big Sale' discount filter"
+    )
+
+    parser.add_argument(
+        "--free-shipping",
+        "-f",
         action="store_true",
-        help="Apply 'Big Sale' discount filter"
+        help="Apply 'Free Shipping' filter",
     )
-    
-    parser.add_argument(
-        "--free-shipping", "-f",
-        action="store_true",
-        help="Apply 'Free Shipping' filter"
-    )
-    
-    parser.add_argument(
-        "--min-price",
-        type=float,
-        help="Minimum price filter"
-    )
-    
-    parser.add_argument(
-        "--max-price",
-        type=float,
-        help="Maximum price filter"
-    )
-    
+
+    parser.add_argument("--min-price", type=float, help="Minimum price filter")
+
+    parser.add_argument("--max-price", type=float, help="Maximum price filter")
+
     parser.add_argument(
         "--delay",
         type=float,
         default=1.0,
-        help="Delay between requests in seconds (default: 1.0)"
+        help="Delay between requests in seconds (default: 1.0)",
     )
-    
+
     parser.add_argument(
         "--fields",
         nargs="+",
         choices=[
-            "Product ID", "Title", "Sale Price", "Original Price", "Discount (%)",
-            "Currency", "Rating", "Orders Count", "Store Name", "Store ID", 
-            "Store URL", "Product URL", "Image URL", "Brand"
+            "Product ID",
+            "Title",
+            "Sale Price",
+            "Original Price",
+            "Discount (%)",
+            "Currency",
+            "Rating",
+            "Orders Count",
+            "Store Name",
+            "Store ID",
+            "Store URL",
+            "Product URL",
+            "Image URL",
+            "Brand",
         ],
         default=[
-            "Product ID", "Title", "Sale Price", "Original Price", "Discount (%)",
-            "Currency", "Rating", "Orders Count", "Store Name", "Store ID", 
-            "Store URL", "Product URL", "Image URL", "Brand"
+            "Product ID",
+            "Title",
+            "Sale Price",
+            "Original Price",
+            "Discount (%)",
+            "Currency",
+            "Rating",
+            "Orders Count",
+            "Store Name",
+            "Store ID",
+            "Store URL",
+            "Product URL",
+            "Image URL",
+            "Brand",
         ],
-        help="Fields to extract (default: all fields)"
+        help="Fields to extract (default: all fields)",
     )
-    
+
     parser.add_argument(
         "--proxy-provider",
         choices=["oxylabs", "massive"],
         default="",
         help="Proxy provider to use (default: None)",
     )
-    
+
     return parser
 
 
@@ -1101,21 +1323,21 @@ def main():
     """Main CLI entry point."""
     parser = create_parser()
     args = parser.parse_args()
-    
+
     # Validate price range
     if args.min_price is not None and args.max_price is not None:
         if args.min_price > args.max_price:
             parser.error("--min-price cannot be greater than --max-price")
-    
+
     print(f"🔍 Starting AliExpress scraper for: '{args.keyword}'")
     print(f"📦 Brand: {args.brand}")
     print(f"📄 Pages to scrape: {args.pages}")
-    
+
     if args.proxy_provider:
         print(f"🌐 Proxy provider: {args.proxy_provider}")
     else:
         print("🌐 Proxy provider: None (direct connection)")
-    
+
     if args.discount:
         print("💰 Big Sale discount filter: ON")
     if args.free_shipping:
@@ -1124,17 +1346,19 @@ def main():
         print(f"💵 Min price: ${args.min_price}")
     if args.max_price is not None:
         print(f"💵 Max price: ${args.max_price}")
-    
+
     print("=" * 50)
-    
+
     try:
         # Validate proxy credentials if proxy provider is specified
         if args.proxy_provider:
             validate_proxy_credentials(args.proxy_provider)
-        
+
         # Initialize session
-        fresh_cookies, fresh_user_agent = initialize_session_data(args.keyword, args.proxy_provider)
-        
+        fresh_cookies, fresh_user_agent = initialize_session_data(
+            args.keyword, args.proxy_provider
+        )
+
         # Scrape data
         raw_products, session = scrape_aliexpress_data(
             keyword=args.keyword,
@@ -1148,16 +1372,15 @@ def main():
             max_price=args.max_price,
             delay=args.delay,
         )
-        
+
         # Check if store information is requested
         store_fields_requested = any(
-            field in args.fields
-            for field in ["Store Name", "Store ID", "Store URL"]
+            field in args.fields for field in ["Store Name", "Store ID", "Store URL"]
         )
-        
+
         if store_fields_requested:
             print("🏪 Store information requested - fetching store details...")
-        
+
         # Extract product details
         extracted_products = extract_product_details(
             raw_products,
@@ -1167,19 +1390,19 @@ def main():
             session=session,
             fetch_store_info=store_fields_requested,
         )
-        
+
         # Save results
         json_file, csv_file = save_results(
             args.keyword, extracted_products, args.fields
         )
-        
+
         print("\n✅ Scraping completed successfully!")
         print(f"📊 Total products extracted: {len(extracted_products)}")
         if json_file:
             print(f"💾 JSON file: {json_file}")
         if csv_file:
             print(f"📋 CSV file: {csv_file}")
-            
+
     except KeyboardInterrupt:
         print("\n⚠️ Scraping interrupted by user")
     except Exception as e:
