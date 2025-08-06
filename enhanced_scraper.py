@@ -9,7 +9,7 @@ import asyncio
 import json
 import os
 import time
-from typing import Any, Callable, Dict, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 from urllib.parse import quote_plus
 
 from captcha_solver import CaptchaSolverContext, CaptchaSolverIntegration
@@ -25,6 +25,18 @@ from scraper import (
     validate_proxy_credentials,
 )
 
+# Import enhanced store scraper integration
+try:
+    from store_integration import enhance_existing_scraper_with_store_integration
+
+    # Apply the enhanced store integration to existing scraper functions
+    enhance_existing_scraper_with_store_integration()
+    pass  # Silent integration
+except ImportError as e:
+    print(f"⚠️ Enhanced store integration not available: {e}")
+except Exception as e:
+    print(f"❌ Error applying store integration: {e}")
+
 
 class EnhancedAliExpressScraper:
     """Enhanced scraper with captcha solving capabilities"""
@@ -34,6 +46,9 @@ class EnhancedAliExpressScraper:
         proxy_provider: str = "",
         enable_captcha_solver: bool = True,
         captcha_solver_headless: bool = True,
+        enable_store_retry: bool = False,
+        store_retry_batch_size: int = 5,
+        store_retry_delay: float = 2.0,
         log_callback: Callable[[str], None] = default_logger,
     ):
         """
@@ -43,11 +58,17 @@ class EnhancedAliExpressScraper:
             proxy_provider: Proxy provider ("oxylabs", "massive", or "" for none)
             enable_captcha_solver: Whether to enable automatic captcha solving
             captcha_solver_headless: Whether to run captcha solver in headless mode
+            enable_store_retry: Whether to automatically retry missing store information
+            store_retry_batch_size: Batch size for store retry operations
+            store_retry_delay: Delay between store retry batches
             log_callback: Logging function
         """
         self.proxy_provider = proxy_provider
         self.enable_captcha_solver = enable_captcha_solver
         self.captcha_solver_headless = captcha_solver_headless
+        self.enable_store_retry = enable_store_retry
+        self.store_retry_batch_size = store_retry_batch_size
+        self.store_retry_delay = store_retry_delay
         self.log_callback = log_callback
         self.proxy_config = self._get_proxy_config()
 
@@ -408,7 +429,147 @@ class EnhancedAliExpressScraper:
             results["json_file"] = json_file
             results["csv_file"] = csv_file
 
+            # Auto-retry store information if enabled
+            if self.enable_store_retry and json_file:
+                await self._auto_retry_store_info(json_file, products)
+
         return results
+
+    async def _auto_retry_store_info(
+        self, json_file: str, products: List[Dict[str, Any]]
+    ) -> None:
+        """
+        Automatically retry missing store information and update the saved file.
+
+        Args:
+            json_file: Path to the saved JSON file
+            products: List of scraped products
+        """
+        try:
+            # Import the store retry functionality
+            from store_integration import get_store_integration
+
+            # Analyze products for missing store info
+            missing_products: List[Dict[str, Any]] = []
+            for product in products:
+                store_name = product.get("Store Name")
+                store_id = product.get("Store ID")
+                store_url = product.get("Store URL")
+                product_url = product.get("Product URL")
+
+                # Check if store information is missing
+                needs_retry = False
+                if not store_name or store_name in [None, "null", "", "N/A"]:
+                    needs_retry = True
+                if not store_id or store_id in [None, "null", "", "N/A"]:
+                    needs_retry = True
+                if not store_url or store_url in [None, "null", "", "N/A"]:
+                    needs_retry = True
+
+                if needs_retry and product_url:
+                    missing_products.append(product)
+
+            if not missing_products:
+                return
+
+            # Extract URLs for retry with explicit typing
+            urls_to_retry: List[str] = [
+                p["Product URL"] for p in missing_products if p.get("Product URL")
+            ]
+
+            if not urls_to_retry:
+                return
+
+            # Get store integration and retry
+            integration = get_store_integration(proxy_provider=self.proxy_provider)
+
+            # Process in batches
+            all_retry_results: Dict[str, Any] = {}
+
+            for i in range(0, len(urls_to_retry), self.store_retry_batch_size):
+                batch_urls: List[str] = urls_to_retry[
+                    i : i + self.store_retry_batch_size
+                ]
+
+                try:
+                    batch_results = await integration.fetch_store_info_enhanced(
+                        batch_urls
+                    )
+                    all_retry_results.update(batch_results)
+
+                except Exception:
+                    pass  # Silent failure
+
+                # Delay between batches
+                if (
+                    i + self.store_retry_batch_size < len(urls_to_retry)
+                    and self.store_retry_delay > 0
+                ):
+                    await asyncio.sleep(self.store_retry_delay)
+
+            # Update products with retry results
+            updated_products: List[Dict[str, Any]] = []
+            successful_updates = 0
+
+            for product in products:
+                product_url = product.get("Product URL")
+
+                if product_url in all_retry_results:
+                    store_info: Dict[str, Any] = all_retry_results[product_url]
+
+                    updated_product = product.copy()
+                    updated = False
+
+                    if store_info.get("store_name"):
+                        updated_product["Store Name"] = store_info["store_name"]
+                        updated = True
+
+                    if store_info.get("store_id"):
+                        updated_product["Store ID"] = store_info["store_id"]
+                        updated = True
+
+                    if store_info.get("store_url"):
+                        updated_product["Store URL"] = store_info["store_url"]
+                        updated = True
+
+                    if updated:
+                        successful_updates += 1
+                        # Add retry metadata
+                        updated_product["_auto_retry_info"] = {
+                            "retry_successful": True,
+                            "retry_timestamp": time.time(),
+                            "retrieved_store_name": store_info.get("store_name"),
+                        }
+
+                    updated_products.append(updated_product)
+                else:
+                    updated_products.append(product)
+
+            # Save updated results if there were successful updates
+            if successful_updates > 0:
+                # Update the JSON file with new data
+                import json
+
+                with open(json_file, "w", encoding="utf-8") as f:
+                    json.dump(updated_products, f, indent=2, ensure_ascii=False)
+
+                # Also update CSV if we have it
+                csv_file = json_file.replace(".json", ".csv")
+                if csv_file != json_file:  # Make sure we actually have a CSV path
+                    try:
+                        import pandas as pd
+
+                        df = pd.DataFrame(updated_products)
+                        df.to_csv(csv_file, index=False)
+                    except ImportError:
+                        pass  # Silent failure
+                    except Exception:
+                        pass  # Silent failure
+
+        except ImportError:
+            pass  # Silent failure
+        except Exception:
+            pass  # Silent failure
 
     async def solve_captcha_for_product_details(
         self, product_urls: list[str]
@@ -540,9 +701,7 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(
             description="Enhanced AliExpress Scraper with Captcha Solving"
         )
-        parser.add_argument(
-            "--keyword", "-k", required=True, help="Search keyword"
-        )
+        parser.add_argument("--keyword", "-k", required=True, help="Search keyword")
         parser.add_argument(
             "--brand", "-b", required=True, help="Brand name to associate with products"
         )
@@ -581,6 +740,23 @@ if __name__ == "__main__":
         parser.add_argument(
             "--max-retries", type=int, default=3, help="Maximum retry attempts"
         )
+        parser.add_argument(
+            "--enable-store-retry",
+            action="store_true",
+            help="Automatically retry missing store information after scraping",
+        )
+        parser.add_argument(
+            "--store-retry-batch-size",
+            type=int,
+            default=5,
+            help="Batch size for store retry operations (default: 5)",
+        )
+        parser.add_argument(
+            "--store-retry-delay",
+            type=float,
+            default=2.0,
+            help="Delay between store retry batches in seconds (default: 2.0)",
+        )
 
         args = parser.parse_args()
 
@@ -592,6 +768,9 @@ if __name__ == "__main__":
             proxy_provider=args.proxy_provider,
             enable_captcha_solver=not args.disable_captcha_solver,
             captcha_solver_headless=not args.captcha_solver_visible,
+            enable_store_retry=args.enable_store_retry,
+            store_retry_batch_size=args.store_retry_batch_size,
+            store_retry_delay=args.store_retry_delay,
         )
 
         # Run enhanced scraper with detailed extraction and automatic saving

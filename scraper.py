@@ -7,7 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
-from typing import Any, Callable, Generator
+from typing import Any, Callable, Dict, Generator, List
 from urllib.parse import quote_plus
 
 import requests
@@ -1316,7 +1316,158 @@ Examples:
         help="Proxy provider to use (default: None)",
     )
 
+    parser.add_argument(
+        "--enable-store-retry",
+        action="store_true",
+        help="Automatically retry missing store information after scraping",
+    )
+
+    parser.add_argument(
+        "--store-retry-batch-size",
+        type=int,
+        default=5,
+        help="Batch size for store retry operations (default: 5)",
+    )
+
+    parser.add_argument(
+        "--store-retry-delay",
+        type=float,
+        default=2.0,
+        help="Delay between store retry batches in seconds (default: 2.0)",
+    )
+
     return parser
+
+
+async def auto_retry_store_info(
+    json_file: str,
+    products: list[dict[str, Any]],
+    proxy_provider: str = "",
+    batch_size: int = 5,
+    delay: float = 2.0,
+) -> None:
+    """
+    Automatically retry missing store information for the regular scraper.
+
+    Args:
+        json_file: Path to the saved JSON file
+        products: List of scraped products
+        proxy_provider: Proxy provider to use
+        batch_size: Batch size for processing
+        delay: Delay between batches
+    """
+    try:
+        # Import the store retry functionality
+        from store_integration import get_store_integration
+
+        # Find products with missing store info
+        missing_products: List[Dict[str, Any]] = []
+        for product in products:
+            store_name = product.get("Store Name")
+            store_id = product.get("Store ID")
+            store_url = product.get("Store URL")
+            product_url = product.get("Product URL")
+
+            # Check if store information is missing
+            needs_retry = False
+            if not store_name or store_name in [None, "null", "", "N/A"]:
+                needs_retry = True
+            if not store_id or store_id in [None, "null", "", "N/A"]:
+                needs_retry = True
+            if not store_url or store_url in [None, "null", "", "N/A"]:
+                needs_retry = True
+
+            if needs_retry and product_url:
+                missing_products.append(product)
+
+        if not missing_products:
+            return
+
+        # Extract URLs for retry with explicit typing
+        urls_to_retry: List[str] = [
+            p["Product URL"] for p in missing_products if p.get("Product URL")
+        ]
+
+        if not urls_to_retry:
+            return
+
+        # Get store integration and retry
+        integration = get_store_integration(proxy_provider=proxy_provider)
+
+        # Process in batches
+        all_retry_results: Dict[str, Any] = {}
+
+        for i in range(0, len(urls_to_retry), batch_size):
+            batch_urls: List[str] = urls_to_retry[i : i + batch_size]
+
+            try:
+                batch_results = await integration.fetch_store_info_enhanced(batch_urls)
+                all_retry_results.update(batch_results)
+
+            except Exception:
+                pass  # Silent failure
+
+            # Delay between batches
+            if i + batch_size < len(urls_to_retry) and delay > 0:
+                import asyncio
+
+                await asyncio.sleep(delay)
+
+        # Update products with retry results
+        updated_products: List[Dict[str, Any]] = []
+        successful_updates = 0
+
+        for product in products:
+            product_url = product.get("Product URL")
+
+            if product_url in all_retry_results:
+                store_info: Dict[str, Any] = all_retry_results[product_url]
+
+                updated_product = product.copy()
+                updated = False
+
+                if store_info.get("store_name"):
+                    updated_product["Store Name"] = store_info["store_name"]
+                    updated = True
+
+                if store_info.get("store_id"):
+                    updated_product["Store ID"] = store_info["store_id"]
+                    updated = True
+
+                if store_info.get("store_url"):
+                    updated_product["Store URL"] = store_info["store_url"]
+                    updated = True
+
+                if updated:
+                    successful_updates += 1
+
+                updated_products.append(updated_product)
+            else:
+                updated_products.append(product)
+
+        # Save updated results if there were successful updates
+        if successful_updates > 0:
+            # Update the JSON file with new data
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump(updated_products, f, indent=2, ensure_ascii=False)
+
+            # Also update CSV if we have it
+            csv_file = json_file.replace(".json", ".csv")
+            if csv_file != json_file:  # Make sure we actually have a CSV path
+                try:
+                    import pandas as pd
+
+                    df = pd.DataFrame(updated_products)
+                    df.to_csv(csv_file, index=False)
+                except ImportError:
+                    pass  # Silent failure
+                except Exception:
+                    pass  # Silent failure
+
+    except ImportError:
+        pass  # Silent failure
+    except Exception:
+        pass  # Silent failure
 
 
 def main():
@@ -1395,6 +1546,27 @@ def main():
         json_file, csv_file = save_results(
             args.keyword, extracted_products, args.fields
         )
+
+        # Auto-retry store information if enabled
+        if args.enable_store_retry:
+            import asyncio
+
+            print(f"\n🔄 Auto-retry enabled: Checking for missing store information...")
+
+            try:
+                # Run the store retry process if json_file is available
+                if json_file:
+                    asyncio.run(
+                        auto_retry_store_info(
+                            json_file=json_file,
+                            products=extracted_products,
+                            proxy_provider=args.proxy_provider,
+                            batch_size=args.store_retry_batch_size,
+                            delay=args.store_retry_delay,
+                        )
+                    )
+            except Exception as e:
+                print(f"⚠️ Auto-retry failed: {e}")
 
         print("\n✅ Scraping completed successfully!")
         print(f"📊 Total products extracted: {len(extracted_products)}")
