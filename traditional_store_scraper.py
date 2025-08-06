@@ -41,6 +41,7 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
         retry_attempts: int = 3,
         optimize_bandwidth: bool = True,
         track_bandwidth_savings: bool = False,
+        enable_css: bool = False,
         **kwargs: Any,
     ):
         """
@@ -54,6 +55,7 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
             retry_attempts: Number of retry attempts for failed extractions
             optimize_bandwidth: Whether to enable bandwidth optimization (block CSS, images, etc.)
             track_bandwidth_savings: Whether to track and log bandwidth savings statistics
+            enable_css: Whether to allow CSS stylesheets to load (useful for visual inspection)
             **kwargs: Additional configuration options
         """
         self.use_oxylabs_proxy = use_oxylabs_proxy
@@ -63,7 +65,12 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
         self.retry_attempts = retry_attempts
         self.optimize_bandwidth = optimize_bandwidth
         self.track_bandwidth_savings = track_bandwidth_savings
+        self.enable_css = enable_css
         self.config = kwargs
+
+        # Manual wait configuration
+        self.manual_wait = kwargs.get("manual_wait", False)
+        self.browser_wait_seconds = kwargs.get("browser_wait_seconds", 3)
 
         # Browser instances for reuse
         self._playwright = None
@@ -195,7 +202,11 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
             return
 
         # Resource types to block for bandwidth optimization (your approach)
-        blocked_types = {"stylesheet", "image", "font", "media", "websocket"}
+        blocked_types = {"image", "font", "media", "websocket"}
+
+        # Conditionally add stylesheet blocking (exclude if CSS is enabled)
+        if not self.enable_css:
+            blocked_types.add("stylesheet")
 
         # Additional patterns for analytics/ads (common third-party domains)
         blocked_patterns = [
@@ -332,6 +343,36 @@ class TraditionalPlaywrightStoreScraper(StoreScraperInterface):
                         f"📊 Single scrape bandwidth: {stats['blocked_requests']}/{stats['total_requests']} "
                         f"requests blocked ({stats['bandwidth_saved_percent']}% savings)"
                     )
+
+                # Manual wait for inspection if enabled and not headless
+                if self.manual_wait and not self.headless:
+                    logger.info(f"🛑 Manual wait mode activated for URL: {product_url}")
+                    if store_info.is_valid:
+                        print(
+                            f"   🛑 Manual wait mode - browser will stay open for inspection"
+                        )
+                        print(
+                            f"   ✅ Store extraction successful: {store_info.store_name}"
+                        )
+                        print(f"   💡 You can verify the extracted store information")
+                        print(f"   ⏸️  Press Ctrl+C when ready to close browser...")
+                    else:
+                        print(
+                            f"   🛑 Manual wait mode - browser will stay open for inspection"
+                        )
+                        print(f"   ❌ Store extraction failed - you can now:")
+                        print(f"      - Solve any captchas manually")
+                        print(f"      - Inspect the page state")
+                        print(f"      - Check for store information")
+                        print(f"   ⏸️  Press Ctrl+C when ready to close browser...")
+                    try:
+                        # Use an infinite sleep that can be interrupted by Ctrl+C
+                        while True:
+                            await asyncio.sleep(1)
+                    except KeyboardInterrupt:
+                        print(f"   ✅ Manual wait completed - closing browser...")
+                    except Exception as e:
+                        print(f"   ⚠️  Manual wait interrupted: {e}")
 
                 return store_info
 
