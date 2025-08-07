@@ -9,11 +9,11 @@ import asyncio
 import json
 import os
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, cast
 from urllib.parse import quote_plus
 
-from captcha_solver import CaptchaSolverContext, CaptchaSolverIntegration
-from scraper import (
+from ..core.captcha_solver import CaptchaSolverContext, CaptchaSolverIntegration
+from ..core.scraper import (
     CACHE_EXPIRATION_SECONDS,
     OXYLABS_ENDPOINT,
     OXYLABS_PASSWORD,
@@ -27,7 +27,9 @@ from scraper import (
 
 # Import enhanced store scraper integration
 try:
-    from store_integration import enhance_existing_scraper_with_store_integration
+    from ..store.store_integration import (
+        enhance_existing_scraper_with_store_integration,
+    )
 
     # Apply the enhanced store integration to existing scraper functions
     enhance_existing_scraper_with_store_integration()
@@ -72,7 +74,7 @@ class EnhancedAliExpressScraper:
         self.log_callback = log_callback
         self.proxy_config = self._get_proxy_config()
 
-    def _get_proxy_config(self) -> Optional[Dict[str, str]]:
+    def _get_proxy_config(self) -> dict[str, str] | None:
         """Get proxy configuration for captcha solver"""
         if self.proxy_provider == "oxylabs":
             if OXYLABS_USERNAME and OXYLABS_PASSWORD:
@@ -88,7 +90,7 @@ class EnhancedAliExpressScraper:
 
     async def initialize_session_with_captcha_solving(
         self, keyword: str
-    ) -> Tuple[Dict[str, Any], str]:
+    ) -> tuple[dict[str, Any], str]:
         """
         Initialize session with automatic captcha solving if needed
 
@@ -168,7 +170,7 @@ class EnhancedAliExpressScraper:
                 keyword, self.proxy_provider, self.log_callback
             )
 
-    def _check_cache(self) -> Optional[Dict[str, Any]]:
+    def _check_cache(self) -> dict[str, Any] | None:
         """Check for valid cached session data"""
         if not os.path.exists(SESSION_CACHE_FILE):
             return None
@@ -196,10 +198,10 @@ class EnhancedAliExpressScraper:
 
         return None
 
-    def _cache_session_data(self, cookies: Dict[str, Any], user_agent: str) -> None:
+    def _cache_session_data(self, cookies: dict[str, Any], user_agent: str) -> None:
         """Cache session data"""
         try:
-            cache_content: Dict[str, Any] = {
+            cache_content: dict[str, Any] = {
                 "timestamp": time.time(),
                 "cookies": cookies,
                 "user_agent": user_agent,
@@ -220,11 +222,11 @@ class EnhancedAliExpressScraper:
         max_pages: int = 1,
         apply_discount_filter: bool = False,
         apply_free_shipping_filter: bool = False,
-        min_price: Optional[float] = None,
-        max_price: Optional[float] = None,
+        min_price: float | None = None,
+        max_price: float | None = None,
         delay: float = 1.0,
         max_retries: int = 3,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Scrape with automatic captcha handling and retry logic
 
@@ -272,7 +274,7 @@ class EnhancedAliExpressScraper:
                 )
 
                 # Use the original scraper's detailed extraction function
-                from scraper import extract_product_details
+                from ..core.scraper import extract_product_details
 
                 # Define all available fields that can be extracted
                 all_fields = [
@@ -305,7 +307,7 @@ class EnhancedAliExpressScraper:
 
                 # Format results to match expected structure
                 # Don't include session object in results as it's not JSON serializable
-                results: Dict[str, Any] = {
+                results: dict[str, Any] = {
                     "products": extracted_products,
                     "keyword": keyword,
                     "total_pages": max_pages,
@@ -340,7 +342,7 @@ class EnhancedAliExpressScraper:
             "products": [],
         }
 
-    def _validate_results(self, results: Dict[str, Any]) -> bool:
+    def _validate_results(self, results: dict[str, Any]) -> bool:
         """Validate scraping results"""
         products = results.get("products", [])
 
@@ -352,7 +354,7 @@ class EnhancedAliExpressScraper:
         for product in products[:3]:  # Check first 3 products
             if not isinstance(product, dict):
                 return False
-            product_dict = cast(Dict[str, Any], product)
+            product_dict = cast(dict[str, Any], product)
             if not product_dict.get("Title") and not product_dict.get("title"):
                 return False
 
@@ -365,7 +367,7 @@ class EnhancedAliExpressScraper:
         max_pages: int = 1,
         save_to_file: bool = True,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run the enhanced scraper with detailed product extraction and optional file saving
 
@@ -395,7 +397,7 @@ class EnhancedAliExpressScraper:
             # Save results using the original scraper's save function
             import os
 
-            from scraper import RESULTS_DIR, save_results
+            from ..core.scraper import RESULTS_DIR, save_results
 
             # Ensure results directory exists
             os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -436,7 +438,7 @@ class EnhancedAliExpressScraper:
         return results
 
     async def _auto_retry_store_info(
-        self, json_file: str, products: List[Dict[str, Any]]
+        self, json_file: str, products: list[dict[str, Any]]
     ) -> None:
         """
         Automatically retry missing store information and update the saved file.
@@ -447,10 +449,10 @@ class EnhancedAliExpressScraper:
         """
         try:
             # Import the store retry functionality
-            from store_integration import get_store_integration
+            from ..store.store_integration import get_store_integration
 
             # Analyze products for missing store info
-            missing_products: List[Dict[str, Any]] = []
+            missing_products: list[dict[str, Any]] = []
             for product in products:
                 store_name = product.get("Store Name")
                 store_id = product.get("Store ID")
@@ -473,7 +475,7 @@ class EnhancedAliExpressScraper:
                 return
 
             # Extract URLs for retry with explicit typing
-            urls_to_retry: List[str] = [
+            urls_to_retry: list[str] = [
                 p["Product URL"] for p in missing_products if p.get("Product URL")
             ]
 
@@ -484,10 +486,10 @@ class EnhancedAliExpressScraper:
             integration = get_store_integration(proxy_provider=self.proxy_provider)
 
             # Process in batches
-            all_retry_results: Dict[str, Any] = {}
+            all_retry_results: dict[str, Any] = {}
 
             for i in range(0, len(urls_to_retry), self.store_retry_batch_size):
-                batch_urls: List[str] = urls_to_retry[
+                batch_urls: list[str] = urls_to_retry[
                     i : i + self.store_retry_batch_size
                 ]
 
@@ -508,14 +510,14 @@ class EnhancedAliExpressScraper:
                     await asyncio.sleep(self.store_retry_delay)
 
             # Update products with retry results
-            updated_products: List[Dict[str, Any]] = []
+            updated_products: list[dict[str, Any]] = []
             successful_updates = 0
 
             for product in products:
                 product_url = product.get("Product URL")
 
                 if product_url in all_retry_results:
-                    store_info: Dict[str, Any] = all_retry_results[product_url]
+                    store_info: dict[str, Any] = all_retry_results[product_url]
 
                     updated_product = product.copy()
                     updated = False
@@ -573,7 +575,7 @@ class EnhancedAliExpressScraper:
 
     async def solve_captcha_for_product_details(
         self, product_urls: list[str]
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """
         Solve captchas for product detail pages and extract session data
 
@@ -591,7 +593,7 @@ class EnhancedAliExpressScraper:
             f"🛡️ Processing {len(product_urls)} product URLs for captcha solving..."
         )
 
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
 
         async with CaptchaSolverContext(
             headless=self.captcha_solver_headless, proxy_config=self.proxy_config
@@ -635,12 +637,12 @@ async def enhanced_scrape_aliexpress(
     captcha_solver_headless: bool = True,
     apply_discount_filter: bool = False,
     apply_free_shipping_filter: bool = False,
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
     delay: float = 1.0,
     max_retries: int = 3,
     log_callback: Callable[[str], None] = default_logger,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Enhanced scraping function with captcha solving
 
@@ -672,7 +674,7 @@ async def solve_captcha_for_urls(
     proxy_provider: str = "",
     headless: bool = True,
     log_callback: Callable[[str], None] = default_logger,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """
     Solve captchas for a list of URLs and return session data
 

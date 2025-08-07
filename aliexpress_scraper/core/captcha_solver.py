@@ -8,7 +8,7 @@ Adapted from French programmer's solution with enhanced integration capabilities
 import asyncio
 import random
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
@@ -17,7 +17,7 @@ class AliExpressCaptchaSolver:
     """Specialized captcha solver for AliExpress"""
 
     def __init__(
-        self, headless: bool = True, proxy_config: Optional[Dict[str, str]] = None
+        self, headless: bool = True, proxy_config: dict[str, str] | None = None
     ):
         """
         Initialize the captcha solver
@@ -28,9 +28,9 @@ class AliExpressCaptchaSolver:
         """
         self.headless = headless
         self.proxy_config = proxy_config
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
-        self.page: Optional[Page] = None
+        self.browser: Browser | None = None
+        self.context: BrowserContext | None = None
+        self.page: Page | None = None
         self.playwright = None
 
     async def start_browser(self) -> None:
@@ -58,7 +58,7 @@ class AliExpressCaptchaSolver:
         )
 
         # Context configuration
-        context_options: Dict[str, Any] = {
+        context_options: dict[str, Any] = {
             "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "viewport": {"width": 1920, "height": 1080},
             "locale": "en-US",
@@ -111,7 +111,7 @@ class AliExpressCaptchaSolver:
 
     async def solve_captcha_on_url(
         self, url: str, max_attempts: int = 5
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Navigate to URL and solve any captcha encountered
 
@@ -524,7 +524,7 @@ class AliExpressCaptchaSolver:
             print(f"⚠️ Error in alternative captcha solving: {str(e)}")
             return False
 
-    async def _extract_session_data(self) -> Dict[str, Any]:
+    async def _extract_session_data(self) -> dict[str, Any]:
         """Extract cookies and user agent from current session"""
         try:
             # Get cookies
@@ -583,10 +583,10 @@ class CaptchaSolverIntegration:
     @staticmethod
     async def solve_captcha_and_get_session(
         url: str,
-        proxy_config: Optional[Dict[str, str]] = None,
+        proxy_config: dict[str, str] | None = None,
         headless: bool = True,
         max_attempts: int = 5,
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Convenience method to solve captcha and get session data
 
@@ -613,7 +613,7 @@ class CaptchaSolverContext:
     """Async context manager for captcha solver"""
 
     def __init__(
-        self, headless: bool = True, proxy_config: Optional[Dict[str, str]] = None
+        self, headless: bool = True, proxy_config: dict[str, str] | None = None
     ):
         self.solver = AliExpressCaptchaSolver(
             headless=headless, proxy_config=proxy_config
@@ -627,8 +627,9 @@ class CaptchaSolverContext:
         await self.solver.close()
 
 
-if __name__ == "__main__":
-    # Example usage
+def main():
+    """Example usage"""
+
     async def test_captcha_solver():
         test_url = "https://www.aliexpress.com/w/wholesale-mechanical-keyboard.html"
 
@@ -650,3 +651,7 @@ if __name__ == "__main__":
 
     # Run test
     asyncio.run(test_captcha_solver())
+
+
+if __name__ == "__main__":
+    main()

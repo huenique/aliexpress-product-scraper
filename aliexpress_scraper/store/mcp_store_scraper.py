@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import Any, cast
 
-from store_scraper_interface import (
+from .scraper_interface import (
     StoreInfo,
     StoreScraperInterface,
     StoreScrapingMethod,

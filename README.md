@@ -2,8 +2,7 @@
 
 A powerful command-line tool for scraping product data from AliExpress using their unofficial API.
 
-![MIT License](https://img.shields.io/badge/License-MIT-green.svg)
-![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)
 
 ## Features
 
@@ -14,10 +13,10 @@ A powerful command-line tool for scraping product data from AliExpress using the
   - Configurable delay between requests (0.2-10 seconds)
   - Sequential request processing to avoid overwhelming the server
   - Session caching to minimize browser automation
-- 🌐 **Optional Proxy Support**: Oxylabs proxy integration for enhanced reliability
-- � **Intelligent Store Retry**: Automatic retry mechanism for missing store information
+- 🌎 **Optional Proxy Support**: Oxylabs proxy integration for enhanced reliability
+- 🧠 **Intelligent Store Retry**: Automatic retry mechanism for missing store information
 - 🏪 **Enhanced Store Data**: Advanced store information extraction with fallback strategies
-- �📊 **Flexible Data Export**:
+- 📊 **Flexible Data Export**:
   - JSON format for full data preservation
   - CSV format for easy spreadsheet import
 - 🎯 **Customizable Fields**: Select exactly which product details to extract
@@ -45,6 +44,226 @@ A powerful command-line tool for scraping product data from AliExpress using the
    - Handles currency formatting
    - Processes URLs and image links
    - Manages pagination automatically
+
+## Project Structure
+
+The AliExpress scraper is organized into a modular architecture with clear separation of concerns:
+
+```text
+aliexpress_scraper/
+├── core/                    # Core scraping functionality
+│   ├── scraper.py          # Basic API-based scraper implementation
+│   └── captcha_solver.py   # Captcha detection and solving utilities
+├── scrapers/               # Enhanced scraping implementations
+│   └── enhanced_scraper.py # Advanced scraper with retry logic
+├── store/                  # Store information extraction modules
+│   ├── scraper_interface.py      # Abstract base classes and interfaces
+│   ├── store_integration.py      # Main store scraper integration layer
+│   ├── mcp_store_scraper.py      # MCP Playwright-based store scraper
+│   └── traditional_store_scraper.py # Standard Playwright store scraper
+├── utils/                  # Utility modules and helpers
+│   ├── standalone_store_retry.py # Store retry logic and batch processing
+│   └── transform_to_listing.py   # Data transformation utilities
+└── cli.py                  # Command-line interface router
+main.py                     # Main entry point
+```
+
+### Core Modules (`core/`)
+
+#### `scraper.py`
+
+The foundational scraping module that provides the basic functionality:
+
+- **API Integration**: Direct communication with AliExpress's unofficial API
+- **Session Management**: Handles browser automation for initial cookie collection
+- **Request Processing**: Sequential API calls with configurable delays
+- **Data Extraction**: Parses product information from API responses
+- **Pagination Handling**: Manages multi-page scraping operations
+- **Caching System**: 30-minute session cache to minimize browser usage
+
+**Key Functions:**
+
+- `scrape_aliexpress_data()`: Main scraping orchestrator
+- `initialize_session_data()`: Browser-based cookie collection
+- `extract_product_details()`: API response parsing
+- `extract_store_information()`: Basic store data extraction
+
+#### `captcha_solver.py`
+
+Specialized captcha detection and solving capabilities:
+
+- **Browser Automation**: Playwright-based captcha detection
+- **Interactive Solving**: Support for manual captcha resolution
+- **Session Integration**: Seamless integration with main scraper
+- **Proxy Support**: Works with proxy providers for enhanced reliability
+- **Stealth Mode**: Anti-detection measures and browser fingerprinting evasion
+
+**Key Classes:**
+
+- `AliExpressCaptchaSolver`: Main captcha solving implementation
+- `CaptchaSolverIntegration`: High-level integration interface
+
+### Enhanced Scrapers (`scrapers/`)
+
+#### `enhanced_scraper.py`
+
+Advanced scraper with comprehensive retry and error handling:
+
+- **Intelligent Retry**: Automatic retry for failed store information extraction
+- **Batch Processing**: Configurable batch sizes for efficient processing
+- **Error Recovery**: Graceful handling of network errors and timeouts
+- **Store Integration**: Deep integration with store scraping modules
+- **Progress Tracking**: Real-time logging and status updates
+- **Result Validation**: Data completeness checking and verification
+
+**Key Features:**
+
+- Product URL retry mechanism for missing store data
+- Configurable retry batch sizes and delays
+- Automatic fallback between scraping methods
+- Comprehensive logging and error reporting
+- Results merging and deduplication
+
+### Store Information System (`store/`)
+
+#### `scraper_interface.py`
+
+Abstract base classes and interfaces that define the store scraping architecture:
+
+- **Interface Definitions**: Abstract base classes for store scrapers
+- **Data Models**: `StoreInfo` class for standardized store data
+- **Method Registry**: Enumeration of available scraping methods
+- **Factory Pattern**: `StoreScraperFactory` for scraper instantiation
+- **Fallback Chain**: `FallbackStoreScraperManager` for method chaining
+
+**Key Components:**
+
+- `StoreScraperInterface`: Base interface for all store scrapers
+- `StoreInfo`: Data class for store information
+- `StoreScrapingMethod`: Enumeration of scraping strategies
+- `StoreScraperFactory`: Factory for creating scraper instances
+
+#### `store_integration.py`
+
+Main integration layer that orchestrates store information extraction:
+
+- **Unified Interface**: Single entry point for all store scraping operations
+- **Method Coordination**: Manages multiple scraping strategies
+- **Proxy Management**: Handles proxy configuration and rotation
+- **Performance Optimization**: Concurrent processing with rate limiting
+- **Legacy Compatibility**: Maintains compatibility with existing data formats
+
+**Integration Features:**
+
+- Automatic scraper selection based on environment
+- Seamless fallback between MCP and traditional scrapers
+- Batch processing with configurable concurrency limits
+- Results formatting and standardization
+
+#### `mcp_store_scraper.py`
+
+VS Code MCP (Model Context Protocol) optimized store scraper:
+
+- **MCP Integration**: Uses VS Code's MCP browser functions
+- **Optimized Performance**: Leverages existing browser instances
+- **Memory Efficiency**: Shared resources with VS Code environment
+- **Enhanced Reliability**: Benefits from VS Code's stability
+- **Developer Experience**: Integrated debugging and monitoring
+
+**MCP Features:**
+
+- Direct integration with VS Code's browser automation
+- Shared browser context for reduced overhead
+- Enhanced error reporting and debugging
+- Seamless development workflow integration
+
+#### `traditional_store_scraper.py`
+
+Universal Playwright-based store scraper for any Python environment:
+
+- **Environment Agnostic**: Works in any Python environment
+- **Full Playwright Features**: Complete access to Playwright capabilities
+- **Independent Operation**: No external dependencies beyond Playwright
+- **Comprehensive Coverage**: Handles all types of store pages
+- **Error Resilience**: Robust error handling and recovery
+
+**Traditional Features:**
+
+- Standalone Playwright browser management
+- Complete DOM manipulation capabilities
+- Screenshot and debugging support
+- Custom browser configuration options
+
+### Utilities (`utils/`)
+
+#### `standalone_store_retry.py`
+
+Comprehensive retry system for store information extraction:
+
+- **Batch Processing**: Intelligent batching of retry operations
+- **Progress Analytics**: Detailed statistics on retry success rates
+- **Method Testing**: Individual scraper method testing and validation
+- **Performance Monitoring**: Bandwidth and timing statistics
+- **Interactive Mode**: Manual intervention support for complex cases
+
+**Retry Features:**
+
+- Configurable retry strategies and delays
+- Comprehensive failure analysis and reporting
+- Support for different scraping method combinations
+- Real-time progress tracking and statistics
+
+#### `transform_to_listing.py`
+
+Data transformation utilities for standardizing scraper output:
+
+- **Schema Mapping**: Converts AliExpress data to standard Listing format
+- **Data Validation**: Ensures data completeness and format correctness
+- **Format Support**: Handles both JSON and CSV input/output formats
+- **UUID Generation**: Creates unique identifiers for each listing
+- **Price Processing**: Standardizes pricing information and currency handling
+
+**Transformation Features:**
+
+- Flexible input format detection
+- Comprehensive data cleaning and validation
+- Price history generation from current pricing data
+- Image URL array formatting
+- Timestamp generation for tracking
+
+### Command-Line Interface (`cli.py`)
+
+Unified command-line router that provides access to all scraping functionality:
+
+- **Subcommand Architecture**: Organized command structure with intuitive navigation
+- **Parameter Validation**: Comprehensive argument validation and error handling
+- **Help System**: Detailed help documentation for all commands and options
+- **Configuration Management**: Environment variable and config file support
+- **Integration Layer**: Seamless integration with all scraper modules
+
+**CLI Structure:**
+
+- `scrape basic`: Access to core scraper functionality
+- `scrape enhanced`: Enhanced scraper with retry capabilities  
+- `transform`: Data transformation operations
+- `store-retry`: Standalone store information retry operations
+
+### Main Entry Point (`main.py`)
+
+Simple entry point that routes all operations through the CLI system:
+
+- **Single Interface**: Unified access point for all functionality
+- **Error Handling**: Top-level error catching and user-friendly messages
+- **Documentation**: Built-in help and usage examples
+- **Environment Setup**: Automatic environment detection and configuration
+
+This modular architecture provides:
+
+- **Separation of Concerns**: Each module has a clear, focused responsibility
+- **Extensibility**: Easy to add new scrapers or data sources
+- **Maintainability**: Clean interfaces make testing and debugging straightforward
+- **Flexibility**: Mix and match components based on specific needs
+- **Scalability**: Architecture supports both simple and complex use cases
 
 ## Installation
 
@@ -90,96 +309,161 @@ A powerful command-line tool for scraping product data from AliExpress using the
 
 ## Usage
 
+### Unified CLI Interface
+
+The project provides a unified command-line interface through `main.py` that gives access to all scraping functionality:
+
+```bash
+# View all available commands
+python main.py --help
+
+# Basic scraping
+python main.py scrape basic --keyword "gaming mouse" --brand "Logitech" --pages 3
+
+# Enhanced scraping with captcha solving and store retry
+python main.py scrape enhanced --keyword "mechanical keyboard" --brand "Razer" --enable-store-retry
+
+# Transform scraper results to listing format
+python main.py transform results/aliexpress_gaming_mouse_extracted.json
+
+# Retry missing store information
+python main.py store-retry results/aliexpress_data.json --batch-size 10
+```
+
 ### Enhanced Scraper with Auto-Retry
 
-The project includes an enhanced scraper (`enhanced_scraper.py`) with intelligent retry capabilities for missing store information:
+The enhanced scraper provides intelligent retry capabilities for missing store information:
 
 ```bash
 # Enhanced scraper with automatic store retry
-python enhanced_scraper.py --keyword "gaming mouse" --brand "Logitech" --enable-store-retry
-
-# Configure retry settings
-python enhanced_scraper.py --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 10 --store-retry-delay 2.0
-
-# Use proxy with enhanced scraper for best results
-python enhanced_scraper.py --keyword "mechanical keyboard" --brand "Razer" --proxy-provider oxylabs --enable-store-retry
+python main.py scrape enhanced --keyword "gaming mouse" --brand "Logitech" --enable-store-retry
 ```
-
-### Basic Usage
 
 ```bash
-python scraper.py --keyword "gaming mouse" --brand "Logitech"
+# Configure retry settings
+python main.py scrape enhanced --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 10 --store-retry-delay 2.0
 ```
 
-### Advanced Usage
+```bash
+# Use proxy with enhanced scraper for best results
+python main.py scrape enhanced --keyword "mechanical keyboard" --brand "Razer" --proxy-provider oxylabs --enable-store-retry
+```
+
+### Basic Scraping Usage
+
+```bash
+python main.py scrape basic --keyword "gaming mouse" --brand "Logitech"
+```
+
+### Advanced Scraping Options
 
 ```bash
 # Scrape multiple pages with filters
-python scraper.py --keyword "bluetooth headphones" --brand "Sony" --pages 5 --discount --free-shipping
+python main.py scrape basic --keyword "bluetooth headphones" --brand "Sony" --pages 5 --discount --free-shipping
 
 # Use proxy for enhanced reliability
-python scraper.py --keyword "mechanical keyboard" --brand "Razer" --pages 3 --proxy-provider oxylabs
+python main.py scrape basic --keyword "mechanical keyboard" --brand "Razer" --pages 3 --proxy-provider oxylabs
 
 # Extract specific fields only
-python scraper.py --keyword "laptop stand" --brand "Generic" --fields "Product ID" "Title" "Sale Price" "Brand"
+python main.py scrape basic --keyword "laptop stand" --brand "Generic" --fields "Product ID" "Title" "Sale Price" "Brand"
 
 # Apply price filters
-python scraper.py --keyword "phone case" --brand "Spigen" --min-price 10 --max-price 50
+python main.py scrape basic --keyword "phone case" --brand "Spigen" --min-price 10 --max-price 50
+```
+
+### Legacy Direct Module Usage
+
+For backward compatibility, you can still run the modules directly:
+
+```bash
+# Enhanced scraper with store retry
+python enhanced_scraper.py --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 10 --store-retry-delay 2.0
+
+# Basic scraper
+python scraper.py --keyword "gaming mouse" --brand "Logitech"
+
+# Transform data
+python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json
+
+# Store retry utility
+python standalone_store_retry.py results/aliexpress_data.json --batch-size 10
 ```
 
 ### Command-Line Options
 
-#### Standard Scraper (`scraper.py`)
+#### Unified CLI (`main.py`)
+
+The main CLI provides organized access to all functionality:
 
 ```text
-Required arguments:
-  --keyword, -k         Product keyword to search for on AliExpress
-  --brand, -b          Brand name to associate with the scraped products
+Available operations:
+  scrape              Scraping operations (basic/enhanced)
+  transform           Transform scraper results to Listing format  
+  store-retry         Retry missing store information
 
-Optional arguments:
-  --pages, -p          Number of pages to scrape (default: 1, max: 60)
-  --discount, -d       Apply 'Big Sale' discount filter
-  --free-shipping, -f  Apply 'Free Shipping' filter
+Basic scraping options:
+  --keyword, -k       Product keyword to search for
+  --brand, -b         Brand name to associate with products
+  --pages, -p         Number of pages to scrape (default: 1, max: 60)
+  --discount, -d      Apply 'Big Sale' discount filter
+  --free-shipping, -f Apply 'Free Shipping' filter
   --min-price         Minimum price filter
   --max-price         Maximum price filter
-  --delay             Delay between requests in seconds (default: 1.0)
-  --fields            Specific fields to extract (default: all fields)
-  --proxy-provider    Proxy provider to use: oxylabs, massive (default: None)
+  --proxy-provider    Proxy provider: oxylabs, massive (default: None)
+
+Enhanced scraping options:
+  --enable-store-retry           Enable automatic store retry
+  --store-retry-batch-size       Batch size for retry operations (default: 5)
+  --store-retry-delay           Delay between retry batches (default: 2.0)
+  --disable-captcha-solver      Disable automatic captcha solving
+  --captcha-solver-visible      Run captcha solver in visible mode
 ```
 
-#### Enhanced Scraper (`enhanced_scraper.py`)
+#### Legacy Direct Module Options
 
-```text
-All standard scraper options plus:
+For backward compatibility when running modules directly, the original module-specific options are still available. See the individual module help for details:
 
-Store Retry Options:
-  --enable-store-retry        Enable automatic retry for missing store information
-  --store-retry-batch-size    Batch size for store retry processing (default: 5)
-  --store-retry-delay         Delay between retry batches in seconds (default: 1.0)
-
-Captcha Handling:
-  --enable-captcha-solver     Enable automatic captcha solving (experimental)
-  --captcha-service          Captcha solving service to use (default: 2captcha)
+```bash
+python enhanced_scraper.py --help
+python scraper.py --help
+python transform_to_listing.py --help
 ```
 
 ### Examples
 
+#### Unified CLI Examples
+
 ```bash
 # Basic scraping
-python scraper.py --keyword "lego batman" --brand "LEGO" --pages 3
+python main.py scrape basic --keyword "lego batman" --brand "LEGO" --pages 3
 
 # Enhanced scraper with store retry
-python enhanced_scraper.py --keyword "gaming mouse" --brand "Razer" --pages 5 --enable-store-retry --proxy-provider oxylabs
+python main.py scrape enhanced --keyword "gaming mouse" --brand "Razer" --pages 5 --enable-store-retry --proxy-provider oxylabs
 
 # Configure retry behavior
-python enhanced_scraper.py --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 8 --store-retry-delay 1.5
+python main.py scrape enhanced --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 8 --store-retry-delay 1.5
 
-# With proxy and filters
-python scraper.py --keyword "gaming mouse" --brand "Razer" --pages 5 --discount --free-shipping --proxy-provider oxylabs
+# Data transformation
+python main.py transform results/aliexpress_gaming_mouse_extracted.json --category "Electronics" --output-format csv
 
-# Price range filtering
-python scraper.py --keyword "bluetooth headphones" --brand "Sony" --pages 2 --min-price 20 --max-price 100
+# Store retry for existing data
+python main.py store-retry results/aliexpress_data.json --batch-size 10 --proxy-provider oxylabs
 ```
+
+#### Legacy Module Examples
+
+```bash
+# Enhanced scraper with proxy and filters
+python enhanced_scraper.py --keyword "gaming mouse" --brand "Razer" --pages 5 --discount --free-shipping --proxy-provider oxylabs
+
+# Price range filtering with basic scraper
+python scraper.py --keyword "bluetooth headphones" --brand "Sony" --pages 2 --min-price 20 --max-price 100
+
+# Transform existing data
+python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json -o listings.csv -f csv
+```
+
+### Output Files
 
 Results will be saved in the `results` folder as:
 

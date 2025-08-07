@@ -15,7 +15,7 @@ import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import mcp_store_scraper  # type: ignore  # noqa: F401
 
@@ -23,7 +23,7 @@ import mcp_store_scraper  # type: ignore  # noqa: F401
 import traditional_store_scraper  # type: ignore  # noqa: F401
 
 
-def load_products_from_json(json_file: str) -> List[Dict[str, Any]]:
+def load_products_from_json(json_file: str) -> list[dict[str, Any]]:
     """Load products from JSON file"""
     try:
         with open(json_file, "r", encoding="utf-8") as f:
@@ -35,7 +35,7 @@ def load_products_from_json(json_file: str) -> List[Dict[str, Any]]:
         sys.exit(1)
 
 
-def save_products_to_json(products: List[Dict[str, Any]], output_file: str) -> None:
+def save_products_to_json(products: list[dict[str, Any]], output_file: str) -> None:
     """Save products to JSON file"""
     try:
         with open(output_file, "w", encoding="utf-8") as f:
@@ -46,7 +46,7 @@ def save_products_to_json(products: List[Dict[str, Any]], output_file: str) -> N
         sys.exit(1)
 
 
-def analyze_missing_store_info(products: List[Dict[str, Any]]) -> Dict[str, int]:
+def analyze_missing_store_info(products: list[dict[str, Any]]) -> dict[str, int]:
     """Analyze missing store information in products"""
     stats = {
         "total_products": len(products),
@@ -80,7 +80,7 @@ def analyze_missing_store_info(products: List[Dict[str, Any]]) -> Dict[str, int]
     return stats
 
 
-def print_analysis(stats: Dict[str, int]) -> None:
+def print_analysis(stats: dict[str, int]) -> None:
     """Print analysis of missing store information"""
     print("\n📊 Store Information Analysis:")
     print(f"   Total products: {stats['total_products']}")
@@ -99,7 +99,7 @@ def test_full_store_scraping_process(
     browser_wait_seconds: int = 3,
     manual_wait: bool = False,
     enable_css: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Test the full intended store scraping process using the actual TraditionalPlaywrightStoreScraper
 
@@ -122,7 +122,7 @@ def test_full_store_scraping_process(
         print(f"   Manual Wait: {manual_wait}")
         print(f"   Enable CSS: {enable_css}")
 
-        async def test_with_real_scraper() -> Dict[str, Any]:
+        async def test_with_real_scraper() -> dict[str, Any]:
             # Create the exact same scraper used in the retry process
             # For store retry, disable bandwidth optimization to allow reCAPTCHA images and resources
             scraper = store_scraper_registry.get_scraper(
@@ -152,7 +152,7 @@ def test_full_store_scraping_process(
                 store_info = await scraper.scrape_single_store(url)
 
                 # Convert StoreInfo object to dict for return
-                result: Dict[str, Any] = {
+                result: dict[str, Any] = {
                     "success": store_info.is_valid,
                     "store_name": store_info.store_name,
                     "store_id": store_info.store_id,
@@ -169,7 +169,7 @@ def test_full_store_scraping_process(
                         stats = scraper.get_bandwidth_stats()  # type: ignore
                         if isinstance(stats, dict):
                             # Type cast to avoid type checker warnings
-                            stats_dict: Dict[str, int] = stats  # type: ignore
+                            stats_dict: dict[str, int] = stats  # type: ignore
                             print(
                                 f"   📊 Bandwidth: {stats_dict.get('blocked_requests', 0)}/{stats_dict.get('total_requests', 0)} blocked"
                             )
@@ -221,15 +221,16 @@ def test_full_store_scraping_process(
         return {"error": error_msg, "success": False}
 
 
-def test_single_url_debug(url: str, proxy_provider: str = "") -> Dict[str, Any]:
+def test_single_url_debug(url: str, proxy_provider: str = "") -> dict[str, Any]:
     """Test a single URL with detailed debugging"""
     try:
         print(f"\n🔍 Debug Testing URL: {url}")
         print(f"   Proxy provider: {proxy_provider if proxy_provider else 'None'}")
 
-        async def debug_single_url() -> Dict[str, Any]:
+        async def debug_single_url() -> dict[str, Any]:
             # Get available scraper methods from the registry
             from store_scraper_interface import store_scraper_registry
+
             methods = store_scraper_registry.list_available_methods()
             print(
                 f"   📋 Available scraper methods: {[str(method) for method in methods]}"
@@ -243,8 +244,9 @@ def test_single_url_debug(url: str, proxy_provider: str = "") -> Dict[str, Any]:
                     # Use the store_scraper_manager directly for individual method testing
                     # Disable bandwidth optimization for CAPTCHA compatibility
                     from store_scraper_interface import store_scraper_manager
+
                     store_info = await store_scraper_manager.scrape_store_with_fallback(
-                        url, 
+                        url,
                         preferred_method=method,
                         optimize_bandwidth=False,  # Disabled for CAPTCHA compatibility
                         track_bandwidth_savings=False,  # No point if not optimizing
@@ -305,12 +307,12 @@ def test_single_url_debug(url: str, proxy_provider: str = "") -> Dict[str, Any]:
 
 
 async def retry_store_information(
-    products: List[Dict[str, Any]],
+    products: list[dict[str, Any]],
     proxy_provider: str = "",
     batch_size: int = 5,
     delay_seconds: float = 2.0,
     max_retries: int = 3,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Retry store information for products with missing data
 
@@ -333,11 +335,12 @@ async def retry_store_information(
 
     # Get available scraper methods from the registry
     from store_scraper_interface import store_scraper_registry
+
     methods = store_scraper_registry.list_available_methods()
 
     print(f"   📋 Available scraper methods: {[str(method) for method in methods]}")
 
-    updated_products: List[Dict[str, Any]] = []
+    updated_products: list[dict[str, Any]] = []
     total_success = 0
     total_failed = 0
 
@@ -352,7 +355,7 @@ async def retry_store_information(
         )
 
         # Process batch concurrently
-        batch_tasks: List[Any] = []
+        batch_tasks: list[Any] = []
         for product in batch:
             product_url = product.get("Product URL", "")
             if product_url:
@@ -401,11 +404,11 @@ async def retry_store_information(
 
 
 async def retry_single_product_store(
-    product: Dict[str, Any],
+    product: dict[str, Any],
     store_url: str,
-    methods: List[Any],  # List of scraper methods
+    methods: list[Any],  # List of scraper methods
     max_retries: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Retry store information for a single product"""
 
     # Check if store info is already complete
@@ -425,13 +428,13 @@ async def retry_single_product_store(
 
     # Try to get store information
     from store_scraper_interface import store_scraper_manager
-    
+
     for method in methods:
         for attempt in range(max_retries):
             try:
                 # Disable bandwidth optimization for CAPTCHA compatibility
                 store_info = await store_scraper_manager.scrape_store_with_fallback(
-                    store_url, 
+                    store_url,
                     preferred_method=method,
                     optimize_bandwidth=False,  # Disabled for CAPTCHA compatibility
                     track_bandwidth_savings=False,  # No point if not optimizing
@@ -473,8 +476,8 @@ async def retry_single_product_store(
 
 
 def retry_with_headed_mode(
-    products: List[Dict[str, Any]], proxy_provider: str = "", failed_only: bool = True
-) -> List[Dict[str, Any]]:
+    products: list[dict[str, Any]], proxy_provider: str = "", failed_only: bool = True
+) -> list[dict[str, Any]]:
     """
     Interactive retry with headed browser mode for manual intervention
 
@@ -574,7 +577,7 @@ def retry_with_headed_mode(
 
 
 def compare_before_after(
-    original_products: List[Dict[str, Any]], updated_products: List[Dict[str, Any]]
+    original_products: list[dict[str, Any]], updated_products: list[dict[str, Any]]
 ) -> None:
     """Compare statistics before and after retry process"""
     print("\n📊 Before/After Comparison:")

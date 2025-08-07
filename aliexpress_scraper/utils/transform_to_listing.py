@@ -12,7 +12,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 
 def parse_price(price_str: str | None) -> float:
@@ -31,7 +31,7 @@ def parse_price(price_str: str | None) -> float:
 def create_price_history(sale_price: str | None, original_price: str | None) -> str:
     """Create price history JSON string from current prices."""
     current_time = datetime.now().isoformat() + "Z"
-    price_history: List[Dict[str, Any]] = []
+    price_history: list[dict[str, Any]] = []
 
     sale_price_num = parse_price(sale_price)
     if sale_price_num > 0:
@@ -56,8 +56,8 @@ def generate_listing_uuid() -> str:
 
 
 def transform_aliexpress_to_listing(
-    aliexpress_data: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    aliexpress_data: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """
     Transform AliExpress data to Listing table schema.
 
@@ -98,14 +98,14 @@ def transform_aliexpress_to_listing(
     """
 
     current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    transformed_data: List[Dict[str, Any]] = []
+    transformed_data: list[dict[str, Any]] = []
 
     for item in aliexpress_data:
         # Skip items that are incomplete (only have Image URL)
         if len(item.keys()) == 1 and "Image URL" in item:
             continue
 
-        transformed_item: Dict[str, Any] = {
+        transformed_item: dict[str, Any] = {
             "listing_uuid": generate_listing_uuid(),
             "product_uuid": None,  # Not available in AliExpress data
             "product_title": item.get("Title", ""),
@@ -150,9 +150,9 @@ def transform_aliexpress_to_listing(
     return transformed_data
 
 
-def read_csv_data(file_path: str) -> List[Dict[str, Any]]:
+def read_csv_data(file_path: str) -> list[dict[str, Any]]:
     """Read AliExpress data from CSV file."""
-    data: List[Dict[str, Any]] = []
+    data: list[dict[str, Any]] = []
     with open(file_path, "r", encoding="utf-8") as file:
         reader = csv.DictReader(file)
         for row in reader:
@@ -160,13 +160,13 @@ def read_csv_data(file_path: str) -> List[Dict[str, Any]]:
     return data
 
 
-def read_json_data(file_path: str) -> List[Dict[str, Any]]:
+def read_json_data(file_path: str) -> list[dict[str, Any]]:
     """Read AliExpress data from JSON file."""
     with open(file_path, "r", encoding="utf-8") as file:
         return json.load(file)
 
 
-def write_to_csv(data: List[Dict[str, Any]], output_path: str):
+def write_to_csv(data: list[dict[str, Any]], output_path: str):
     """Write transformed data to CSV file."""
     if not data:
         print("No data to write.")
@@ -179,7 +179,7 @@ def write_to_csv(data: List[Dict[str, Any]], output_path: str):
         writer.writerows(data)
 
 
-def write_to_json(data: List[Dict[str, Any]], output_path: str):
+def write_to_json(data: list[dict[str, Any]], output_path: str):
     """Write transformed data to JSON file."""
     with open(output_path, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=2, ensure_ascii=False)

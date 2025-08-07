@@ -14,11 +14,13 @@ from typing import Any, Callable
 
 # Import implementations to register them
 # These imports are required for the decorators to execute and register the scrapers
-import mcp_store_scraper  # pyright: ignore[reportUnusedImport] # noqa: F401
-import traditional_store_scraper  # pyright: ignore[reportUnusedImport] # noqa: F401
+from . import (
+    mcp_store_scraper,  # pyright: ignore[reportUnusedImport]
+    traditional_store_scraper,  # pyright: ignore[reportUnusedImport]
+)
 
 # Import the dependency injection framework
-from store_scraper_interface import (
+from .scraper_interface import (
     StoreScrapingMethod,
     setup_default_fallback_chain,
     store_scraper_manager,
@@ -221,8 +223,8 @@ def enhance_existing_scraper_with_store_integration():
     """
     try:
         # Import existing scraper modules
-        import enhanced_scraper
-        import scraper
+        from ..core import scraper
+        from ..scrapers import enhanced_scraper
 
         # Create async wrapper for the existing synchronous interface
         def create_async_wrapper(
@@ -407,7 +409,7 @@ def list_available_store_methods() -> list[str]:
     Returns:
         list of available method names
     """
-    from store_scraper_interface import store_scraper_registry
+    from .scraper_interface import store_scraper_registry
 
     available_methods = store_scraper_registry.list_available_methods()
     return [method.value for method in available_methods]
