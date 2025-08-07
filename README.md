@@ -324,7 +324,7 @@ python main.py scrape basic --keyword "gaming mouse" --brand "Logitech" --pages 
 python main.py scrape enhanced --keyword "mechanical keyboard" --brand "Razer" --enable-store-retry
 
 # Transform scraper results to listing format
-python main.py transform results/aliexpress_gaming_mouse_extracted.json
+python main.py transform results/aliexpress_gaming_mouse_20250808_1754597039.json
 
 # Retry missing store information
 python main.py store-retry results/aliexpress_data.json --batch-size 10
@@ -383,7 +383,7 @@ python enhanced_scraper.py --keyword "bluetooth headphones" --brand "Sony" --ena
 python scraper.py --keyword "gaming mouse" --brand "Logitech"
 
 # Transform data
-python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json
+python transform_to_listing.py results/aliexpress_gaming_mouse_20250808_1754597039.json
 
 # Store retry utility
 python standalone_store_retry.py results/aliexpress_data.json --batch-size 10
@@ -444,7 +444,7 @@ python main.py scrape enhanced --keyword "gaming mouse" --brand "Razer" --pages 
 python main.py scrape enhanced --keyword "bluetooth headphones" --brand "Sony" --enable-store-retry --store-retry-batch-size 8 --store-retry-delay 1.5
 
 # Data transformation
-python main.py transform results/aliexpress_gaming_mouse_extracted.json --category "Electronics" --output-format csv
+python main.py transform results/aliexpress_gaming_mouse_20250808_1754597039.json --category "Electronics" --output-format csv
 
 # Store retry for existing data
 python main.py store-retry results/aliexpress_data.json --batch-size 10 --proxy-provider oxylabs
@@ -460,15 +460,20 @@ python enhanced_scraper.py --keyword "gaming mouse" --brand "Razer" --pages 5 --
 python scraper.py --keyword "bluetooth headphones" --brand "Sony" --pages 2 --min-price 20 --max-price 100
 
 # Transform existing data
-python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json -o listings.csv -f csv
+python transform_to_listing.py results/aliexpress_gaming_mouse_20250808_1754597039.json -o listings.csv -f csv
 ```
 
 ### Output Files
 
-Results will be saved in the `results` folder as:
+Results will be saved in the `results` folder with the following naming format:
 
-- `aliexpress_[keyword]_extracted.json`
-- `aliexpress_[keyword]_extracted.csv`
+- `aliexpress_<brand>_<date>_<unixtimestamp>.json`
+- `aliexpress_<brand>_<date>_<unixtimestamp>.csv`
+
+For example:
+
+- `aliexpress_logitech_20250808_1754597039.json`
+- `aliexpress_logitech_20250808_1754597039.csv`
 
 ## Store Information Extraction
 
@@ -512,14 +517,14 @@ Use `transform_to_listing.py` to convert scraper results to a structured format 
 
 ```bash
 # Transform JSON results
-python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json
+python transform_to_listing.py results/aliexpress_gaming_mouse_20250808_1754597039.json
 
 # Transform CSV results
-python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.csv
+python transform_to_listing.py results/aliexpress_gaming_mouse_20250808_1754597039.csv
 
 # Specify output format and filename
-python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json -o transformed_data.csv -f csv
-python transform_to_listing.py results/aliexpress_gaming_mouse_extracted.json -o transformed_data.json -f json
+python transform_to_listing.py results/aliexpress_gaming_mouse_20250808_1754597039.json -o transformed_data.csv -f csv
+python transform_to_listing.py results/aliexpress_gaming_mouse_20250808_1754597039.json -o transformed_data.json -f json
 ```
 
 ### Transformation Features

@@ -111,7 +111,10 @@ def test_full_store_scraping_process(
         enable_css: If True, enable CSS loading for better visual inspection
     """
     try:
-        from store_scraper_interface import StoreScrapingMethod, store_scraper_registry
+        from ..store.scraper_interface import (
+            StoreScrapingMethod,
+            store_scraper_registry,
+        )
 
         print(
             f"\n🎯 Full Store Scraping Process Test (Using Real TraditionalPlaywrightStoreScraper)"
@@ -229,7 +232,7 @@ def test_single_url_debug(url: str, proxy_provider: str = "") -> dict[str, Any]:
 
         async def debug_single_url() -> dict[str, Any]:
             # Get available scraper methods from the registry
-            from store_scraper_interface import store_scraper_registry
+            from ..store.scraper_interface import store_scraper_registry
 
             methods = store_scraper_registry.list_available_methods()
             print(
@@ -243,7 +246,7 @@ def test_single_url_debug(url: str, proxy_provider: str = "") -> dict[str, Any]:
                 try:
                     # Use the store_scraper_manager directly for individual method testing
                     # Disable bandwidth optimization for CAPTCHA compatibility
-                    from store_scraper_interface import store_scraper_manager
+                    from ..store.scraper_interface import store_scraper_manager
 
                     store_info = await store_scraper_manager.scrape_store_with_fallback(
                         url,
@@ -334,7 +337,7 @@ async def retry_store_information(
     print(f"   Proxy provider: {proxy_provider if proxy_provider else 'None'}")
 
     # Get available scraper methods from the registry
-    from store_scraper_interface import store_scraper_registry
+    from ..store.scraper_interface import store_scraper_registry
 
     methods = store_scraper_registry.list_available_methods()
 
@@ -427,7 +430,7 @@ async def retry_single_product_store(
     product_name = product.get("Product Name", "Unknown Product")[:50]
 
     # Try to get store information
-    from store_scraper_interface import store_scraper_manager
+    from ..store.scraper_interface import store_scraper_manager
 
     for method in methods:
         for attempt in range(max_retries):
@@ -610,7 +613,7 @@ def main():
         epilog="""
 Examples:
   # Basic retry with default settings
-  python standalone_store_retry.py aliexpress_logitech_keyboard_extracted.json
+  python standalone_store_retry.py aliexpress_logitech_20250808_1754597039.json
 
   # Specify output file
   python standalone_store_retry.py input.json output_with_stores.json

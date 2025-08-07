@@ -424,6 +424,7 @@ class EnhancedAliExpressScraper:
                 keyword=keyword,
                 data=products,
                 selected_fields=all_fields,
+                brand=brand,
                 log_callback=self.log_callback,
             )
 

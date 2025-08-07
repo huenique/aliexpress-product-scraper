@@ -1087,11 +1087,13 @@ def save_results(
     keyword: str,
     data: list[dict[str, Any]],
     selected_fields: list[str],
+    brand: str = "",
     log_callback: Callable[[str], None] = default_logger,
 ) -> tuple[str | None, str | None]:
     """
-    Saves the extracted data to JSON and CSV files, named using the keyword.
+    Saves the extracted data to JSON and CSV files, named using brand, date, and timestamp.
     Uses selected_fields for CSV headers.
+    Format: aliexpress_<brand>_<date>_<unixtimestamp>.<file_extension>
     """
     if not data:
         log_callback("No data to save.")
@@ -1101,13 +1103,20 @@ def save_results(
         return None, None
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    keyword_safe_name = "".join(c if c.isalnum() else "_" for c in keyword)
-    json_filename = os.path.join(
-        RESULTS_DIR, f"aliexpress_{keyword_safe_name}_extracted.json"
+
+    # Generate filename components
+    brand_safe = (
+        "".join(c.lower() if c.isalnum() else "_" for c in brand)
+        if brand
+        else "unknown"
     )
-    csv_filename = os.path.join(
-        RESULTS_DIR, f"aliexpress_{keyword_safe_name}_extracted.csv"
-    )
+    date_str = datetime.datetime.now().strftime("%Y%m%d")
+    unix_timestamp = str(int(time.time()))
+
+    # Create new filename format
+    base_filename = f"aliexpress_{brand_safe}_{date_str}_{unix_timestamp}"
+    json_filename = os.path.join(RESULTS_DIR, f"{base_filename}.json")
+    csv_filename = os.path.join(RESULTS_DIR, f"{base_filename}.csv")
 
     try:
         with open(json_filename, "w", encoding="utf-8") as f:
@@ -1212,7 +1221,7 @@ def run_scrape_job(
 
             logger.log("Saving results...")
             save_results(
-                keyword, extracted_data, selected_fields, log_callback=logger.log
+                keyword, extracted_data, selected_fields, brand, log_callback=logger.log
             )
 
         except Exception as e:
@@ -1373,7 +1382,7 @@ async def auto_retry_store_info(
     """
     try:
         # Import the store retry functionality
-        from store_integration import get_store_integration
+        from ..store.store_integration import get_store_integration
 
         # Find products with missing store info
         missing_products: list[dict[str, Any]] = []
@@ -1559,7 +1568,7 @@ def main():
 
         # Save results
         json_file, csv_file = save_results(
-            args.keyword, extracted_products, args.fields
+            args.keyword, extracted_products, args.fields, args.brand
         )
 
         # Auto-retry store information if enabled
