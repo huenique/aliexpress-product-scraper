@@ -9,6 +9,7 @@ A powerful command-line tool for scraping product data from AliExpress using the
 - 🖥️ **Command-Line Interface**: Simple and efficient CLI for batch processing and automation
 - 🚀 **API-Based Scraping**: Fast and efficient data collection using AliExpress's unofficial API
 - 🔒 **Smart Session Management**: Uses browser automation only for initial cookie collection
+- ⚡ **Multi-Query Parallel Scraping**: Process multiple search queries simultaneously across all CPU cores
 - 🛡️ **Anti-Block Protection**:
   - Configurable delay between requests (0.2-10 seconds)
   - Sequential request processing to avoid overwhelming the server
@@ -371,6 +372,89 @@ python main.py scrape basic --keyword "laptop stand" --brand "Generic" --fields 
 python main.py scrape basic --keyword "phone case" --brand "Spigen" --min-price 10 --max-price 50
 ```
 
+### Multi-Query Parallel Scraping ⚡
+
+The multi-query feature allows you to process multiple search queries simultaneously, utilizing all available CPU cores for maximum efficiency.
+
+#### Setup Query File
+
+Create a text file with one search query per line:
+
+```bash
+# Create queries/instyler.txt
+cat > queries/instyler.txt << EOF
+instyler
+instyler rotating iron
+instyler hair dryer
+instyler styling iron
+instyler styling brush
+instyler dryer
+instyler accessories
+instyler 7x
+EOF
+```
+
+#### Run Multi-Query Scraping
+
+```bash
+# Basic multi-query scraping
+python main.py scrape multi \
+  --queries-dir queries/instyler.txt \
+  --brand "InStyler" \
+  --scraper-type basic \
+  --pages 2
+
+# Enhanced multi-query scraping (recommended for better success rate)
+python main.py scrape multi \
+  --queries-dir queries/instyler.txt \
+  --brand "InStyler" \
+  --scraper-type enhanced \
+  --max-pages 3 \
+  --enable-store-retry
+
+# With custom worker count and output prefix
+python main.py scrape multi \
+  --queries-dir queries/gaming_products.txt \
+  --brand "Gaming" \
+  --scraper-type enhanced \
+  --max-workers 4 \
+  --output-prefix "gaming_products" \
+  --max-pages 2
+```
+
+#### Multi-Query Features
+
+- **Parallel Processing**: Uses all CPU cores by default (configurable with `--max-workers`)
+- **Individual Output Files**: Each query generates its own JSON file:
+  - Format: `{output_prefix}_{clean_query}_{timestamp}.json`
+  - Example: `aliexpress_instyler_rotating_iron_20250808_175459123.json`
+- **Automatic Result Merging**: Combines all individual JSON results into a single CSV file
+- **Progress Tracking**: Real-time progress updates for each query
+- **Error Resilience**: Continues processing even if individual queries fail
+- **Comprehensive Summary**: Shows success/failure statistics and total execution time
+
+#### Example Multi-Query Results
+
+```bash
+📋 Found 8 queries to process
+🔧 Scraper type: enhanced  
+⚙️ Using 8 parallel workers
+
+✅ Completed scraping for query: 'instyler' -> aliexpress_instyler_20250808_175459123.json
+✅ Completed scraping for query: 'instyler rotating iron' -> aliexpress_instyler_rotating_iron_20250808_175501456.json
+✅ Completed scraping for query: 'instyler hair dryer' -> aliexpress_instyler_hair_dryer_20250808_175503789.json
+
+📈 Scraping Summary:
+   ✅ Successful: 8
+   ❌ Failed: 0  
+   ⏱️ Total time: 245.67 seconds
+
+🔄 Merging 8 result files...
+📄 Merged results saved to: results/aliexpress_merged_20250808_175505012.csv
+📊 Total records: 1,247
+🎉 Final merged results: results/aliexpress_merged_20250808_175505012.csv
+```
+
 ### Legacy Direct Module Usage
 
 For backward compatibility, you can still run the modules directly:
@@ -465,15 +549,15 @@ python transform_to_listing.py results/aliexpress_gaming_mouse_20250808_17545970
 
 ### Output Files
 
-Results will be saved in the `results` folder with the following naming format:
+Results will be saved in the `results` folder with the following naming format (no Unix timestamp):
 
-- `aliexpress_<brand>_<date>_<unixtimestamp>.json`
-- `aliexpress_<brand>_<date>_<unixtimestamp>.csv`
+- `aliexpress_<brand>_<date>.json`
+- `aliexpress_<brand>_<date>.csv`
 
 For example:
 
-- `aliexpress_logitech_20250808_1754597039.json`
-- `aliexpress_logitech_20250808_1754597039.csv`
+- `aliexpress_logitech_20250808.json`
+- `aliexpress_logitech_20250808.csv`
 
 ## Store Information Extraction
 

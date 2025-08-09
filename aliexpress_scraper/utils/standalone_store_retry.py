@@ -17,10 +17,16 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import mcp_store_scraper  # type: ignore  # noqa: F401
+# Optional imports for store scraper modules - use try/except to handle missing modules
+try:
+    from ..store import mcp_store_scraper  # type: ignore  # noqa: F401
+except ImportError:
+    pass  # mcp_store_scraper not available
 
-# Import scraper modules to register their decorators
-import traditional_store_scraper  # type: ignore  # noqa: F401
+try:
+    from ..store import traditional_store_scraper  # type: ignore  # noqa: F401
+except ImportError:
+    pass  # traditional_store_scraper not available
 
 
 def load_products_from_json(json_file: str) -> list[dict[str, Any]]:

@@ -6,6 +6,8 @@ Extends the original scraper with automatic captcha solving capabilities
 
 import argparse
 import asyncio
+import csv
+import datetime
 import json
 import os
 import time
@@ -121,9 +123,7 @@ class EnhancedAliExpressScraper:
             )
 
         # Use captcha solver for session initialization
-        search_url = (
-            f"https://www.aliexpress.com/w/wholesale-{quote_plus(keyword)}.html"
-        )
+        search_url = f"https://www.aliexpress.us/w/wholesale-{quote_plus(keyword)}.html"
 
         try:
             self.log_callback(
@@ -366,6 +366,7 @@ class EnhancedAliExpressScraper:
         brand: str,
         max_pages: int = 1,
         save_to_file: bool = True,
+        stream: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
@@ -383,7 +384,139 @@ class EnhancedAliExpressScraper:
         """
         self.log_callback(f"🚀 Starting enhanced scraper for keyword: '{keyword}'")
 
-        # Run the scraping with captcha handling
+        # Common fields for extraction/saving
+        all_fields = [
+            "Product ID",
+            "Title",
+            "Sale Price",
+            "Original Price",
+            "Discount (%)",
+            "Currency",
+            "Rating",
+            "Orders Count",
+            "Store Name",
+            "Store ID",
+            "Store URL",
+            "Product URL",
+            "Image URL",
+            "Brand",
+        ]
+
+        if stream:
+            # Streaming mode: produce a JSON array incrementally + CSV row-by-row
+            from ..core.scraper import RESULTS_DIR, extract_product_details
+
+            # Safe path helper (backup existing files)
+            def ensure_safe_path(path: str) -> str:
+                if not os.path.exists(path):
+                    return path
+                base, ext = os.path.splitext(path)
+                n = 1
+                while True:
+                    candidate = f"{base}.bak{n}{ext}"
+                    if not os.path.exists(candidate):
+                        try:
+                            os.rename(path, candidate)
+                        except Exception:
+                            pass
+                        return path
+                    n += 1
+
+            # Stable file names (no timestamps) per brand + date
+            brand_safe = (
+                "".join(c.lower() if c.isalnum() else "_" for c in brand)
+                if brand
+                else "unknown"
+            )
+            date_str = datetime.datetime.now().strftime("%Y%m%d")
+            os.makedirs(RESULTS_DIR, exist_ok=True)
+            json_path = os.path.join(
+                RESULTS_DIR, f"aliexpress_{brand_safe}_{date_str}.json"
+            )
+            csv_path = os.path.join(
+                RESULTS_DIR, f"aliexpress_{brand_safe}_{date_str}.csv"
+            )
+            json_path = ensure_safe_path(json_path)
+            csv_path = ensure_safe_path(csv_path)
+
+            # Initialize session (captcha-aware)
+            cookies, user_agent = await self.initialize_session_with_captcha_solving(
+                keyword
+            )
+
+            total_written = 0
+            first_row = True
+
+            # We write '[' then objects separated by commas, then ']' at end
+            with (
+                open(json_path, "w", encoding="utf-8") as jf,
+                open(csv_path, "w", encoding="utf-8", newline="") as cf,
+            ):
+                jf.write("[\n")
+                csv_writer = csv.DictWriter(
+                    cf, fieldnames=all_fields, extrasaction="ignore"
+                )
+                csv_writer.writeheader()
+
+                def on_page(page_num: int, items: list[dict[str, Any]]) -> None:
+                    nonlocal total_written, first_row
+                    if not items:
+                        return
+                    extracted = extract_product_details(
+                        items,
+                        all_fields,
+                        brand,
+                        self.proxy_provider,
+                        session=None,
+                        fetch_store_info=False,  # Avoid extra requests while streaming
+                        log_callback=self.log_callback,
+                    )
+                    for row in extracted:
+                        # JSON array punctuation management
+                        if not first_row:
+                            jf.write(",\n")
+                        jf.write(json.dumps(row, ensure_ascii=False))
+                        first_row = False
+                        csv_writer.writerow(row)
+                        total_written += 1
+                    cf.flush()
+                    jf.flush()
+
+                # Run underlying scrape in executor (keeps event loop free)
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: scrape_aliexpress_data(
+                        keyword=keyword,
+                        max_pages=max_pages,
+                        cookies=cookies,
+                        user_agent=user_agent,
+                        proxy_provider=self.proxy_provider,
+                        apply_discount_filter=kwargs.get(
+                            "apply_discount_filter", False
+                        ),
+                        apply_free_shipping_filter=kwargs.get(
+                            "apply_free_shipping_filter", False
+                        ),
+                        min_price=kwargs.get("min_price"),
+                        max_price=kwargs.get("max_price"),
+                        delay=kwargs.get("delay", 1.0),
+                        log_callback=self.log_callback,
+                        on_page=on_page,
+                    ),
+                )
+
+                # Close JSON array
+                jf.write("\n]\n")
+
+            return {
+                "products": [],  # Not held in memory
+                "json_file": json_path,
+                "csv_file": csv_path,
+                "total_streamed": total_written,
+                "stream": True,
+            }
+
+        # Non-streaming: run regular enhanced flow and save if requested
         results = await self.scrape_with_captcha_handling(
             keyword=keyword, brand=brand, max_pages=max_pages, **kwargs
         )
@@ -394,31 +527,9 @@ class EnhancedAliExpressScraper:
         products = results.get("products", [])
 
         if save_to_file and products:
-            # Save results using the original scraper's save function
-            import os
-
             from ..core.scraper import RESULTS_DIR, save_results
 
-            # Ensure results directory exists
             os.makedirs(RESULTS_DIR, exist_ok=True)
-
-            # Define all available fields for saving
-            all_fields = [
-                "Product ID",
-                "Title",
-                "Sale Price",
-                "Original Price",
-                "Discount (%)",
-                "Currency",
-                "Rating",
-                "Orders Count",
-                "Store Name",
-                "Store ID",
-                "Store URL",
-                "Product URL",
-                "Image URL",
-                "Brand",
-            ]
 
             json_file, csv_file = save_results(
                 keyword=keyword,
@@ -428,11 +539,9 @@ class EnhancedAliExpressScraper:
                 log_callback=self.log_callback,
             )
 
-            # Add file paths to results
             results["json_file"] = json_file
             results["csv_file"] = csv_file
 
-            # Auto-retry store information if enabled
             if self.enable_store_retry and json_file:
                 await self._auto_retry_store_info(json_file, products)
 

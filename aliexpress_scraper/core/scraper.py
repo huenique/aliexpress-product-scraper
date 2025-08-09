@@ -260,6 +260,7 @@ def scrape_aliexpress_data(
     max_price: float | None = None,
     delay: float = 1.0,
     log_callback: Callable[[str], None] = default_logger,
+    on_page: Callable[[int, list[dict[str, Any]]], None] | None = None,
 ) -> tuple[list[dict[str, Any]], Any]:
     """
     Uses requests with extracted session data to scrape product results
@@ -324,14 +325,29 @@ def scrape_aliexpress_data(
         price_range_str = f"-{max_price_int}"
         log_callback(f"Applying Price Filter: Max {max_price_int}")
 
-    for current_page_num in range(1, max_pages + 1):
-        log_callback(
-            f"Attempting to fetch page {current_page_num} for product: '{keyword}' via API..."
-        )
+    # --- Parallel page fetching ---
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    def fetch_page(page_num: int) -> tuple[int, list[dict[str, Any]]]:
+        """Fetch a single page and return (page_num, items). Uses its own session for thread-safety."""
+        # Independent session per thread for safety
+        local_session = requests.Session()
+
+        # Configure proxy for requests session based on provider
+        if proxy_provider == "oxylabs":
+            proxy_auth_l = f"{OXYLABS_USERNAME}:{OXYLABS_PASSWORD}"
+            proxy_url_l = f"http://{proxy_auth_l}@{OXYLABS_ENDPOINT}"
+            local_session.proxies = {"http": proxy_url_l, "https": proxy_url_l}
+        elif proxy_provider == "massive":
+            # Add massive proxy configuration when implemented
+            raise NotImplementedError("Massive proxy provider is not yet implemented")
+
+        # Set cookies and headers
+        local_session.cookies.update(cookies)  # type: ignore
         request_headers = current_base_headers.copy()
+
         referer_keyword_part = quote_plus(keyword)
-        referer_url = f"https://www.aliexpress.com/w/wholesale-{referer_keyword_part}.html?page={current_page_num}&g=y&SearchText={referer_keyword_part}"
+        referer_url = f"https://www.aliexpress.com/w/wholesale-{referer_keyword_part}.html?page={page_num}&g=y&SearchText={referer_keyword_part}"
         if active_switches:
             switches_value = ",".join(active_switches)
             referer_url += f"&selectedSwitches={quote_plus(switches_value)}"
@@ -343,7 +359,7 @@ def scrape_aliexpress_data(
             "pageVersion": "7ece9c0cc9cf2052db74f0d1b26b7033",
             "target": "root",
             "data": {
-                "page": current_page_num,
+                "page": page_num,
                 "g": "y",
                 "SearchText": keyword,
                 "origin": "y",
@@ -351,41 +367,34 @@ def scrape_aliexpress_data(
             "eventName": "onChange",
             "dependency": [],
         }
-
         if active_switches:
             payload["data"]["selectedSwitches"] = ",".join(active_switches)
         if price_range_str:
             payload["data"]["pr"] = price_range_str
 
-        response: requests.Response | None = None
+        log_callback(
+            f"Attempting to fetch page {page_num} for product: '{keyword}' via API..."
+        )
 
-        # Make the POST request
         try:
-            response = session.post(
+            response_l = local_session.post(
                 API_URL, json=payload, headers=request_headers, timeout=30
             )
-
-            if response.status_code != 200:
+            if response_l.status_code != 200:
                 log_callback(
-                    f"Failed to fetch page {current_page_num}. Status code: {response.status_code}"
+                    f"Failed to fetch page {page_num}. Status code: {response_l.status_code}"
                 )
-                log_callback(f"Response text sample: {response.text[:200]}")
-                break
+                log_callback(f"Response text sample: {response_l.text[:200]}")
+                return page_num, []
 
-            json_data: dict[str, Any] | None = response.json()
-
-            # save the json response to debug/ dir (for debugging only)
-            # with open(f"debug/api_response_page_{current_page_num}.json", "w") as f:
-            #     json.dump(json_data, f, indent=4)
-
+            json_data: dict[str, Any] | None = response_l.json()
             if not isinstance(json_data, dict):
                 log_callback(
-                    f"Unexpected response format for page {current_page_num}. Expected JSON dict."
+                    f"Unexpected response format for page {page_num}. Expected JSON dict."
                 )
-                log_callback(f"Response text sample: {response.text[:200]}")
-                break
+                log_callback(f"Response text sample: {response_l.text[:200]}")
+                return page_num, []
 
-            # Check for validation/captcha errors
             if json_data.get("ret") and "FAIL_SYS_USER_VALIDATE" in json_data.get(
                 "ret", []
             ):
@@ -398,7 +407,7 @@ def scrape_aliexpress_data(
                 log_callback(
                     "   Example: uv run python enhanced_scraper.py 'mechanical keyboard' --max-pages 1"
                 )
-                break
+                return page_num, []
 
             items_list = (
                 json_data.get("data", {})
@@ -410,46 +419,48 @@ def scrape_aliexpress_data(
 
             if not items_list:
                 log_callback(
-                    f"No items found using path 'data.result.mods.itemList.content' on page {current_page_num}."
+                    f"No items found using path 'data.result.mods.itemList.content' on page {page_num}."
                 )
-                if current_page_num == max_pages:
-                    log_callback(
-                        f"Reached requested page limit ({max_pages}) with no items found on this last page."
-                    )
-                    break
-                elif current_page_num > 1:
-                    log_callback(
-                        f"Stopping search: No items found on page {current_page_num} (before requested limit of {max_pages} pages)."
-                    )
-                    break
-                else:
-                    log_callback(
-                        "Continuing to next page (in case only page 1 structure differs)."
-                    )
+                return page_num, []
             else:
-                log_callback(
-                    f"Found {len(items_list)} items on page {current_page_num}."
-                )
-                all_products_raw.extend(items_list)
+                log_callback(f"Found {len(items_list)} items on page {page_num}.")
+                return page_num, items_list
 
         except requests.exceptions.RequestException as e:
-            log_callback(f"Request failed for page {current_page_num}: {e}")
-            break
+            log_callback(f"Request failed for page {page_num}: {e}")
+            return page_num, []
         except json.JSONDecodeError:
-            log_callback(f"Failed to decode JSON response for page {current_page_num}.")
-            if response:
-                log_callback(f"Response text sample: {response.text[:200]}")
-            else:
-                log_callback(
-                    "No response object available. This may indicate a connection error."
-                )
-            break
+            log_callback(f"Failed to decode JSON response for page {page_num}.")
+            return page_num, []
         except Exception as e:
-            log_callback(f"An error occurred processing page {current_page_num}: {e}")
-            break
+            log_callback(f"An error occurred processing page {page_num}: {e}")
+            return page_num, []
 
-        # Delay between requests
-        time.sleep(delay)
+    # Limit workers to a reasonable number
+    max_workers = min(max_pages, 8)
+    page_results: dict[int, list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(fetch_page, p): p for p in range(1, max_pages + 1)}
+        for future in as_completed(futures):
+            page_num, items = future.result()
+            if on_page is not None:
+                # Stream page results immediately
+                try:
+                    on_page(page_num, items)
+                except Exception as e:
+                    log_callback(f"Streaming callback failed for page {page_num}: {e}")
+            else:
+                page_results[page_num] = items
+            # Optional slight pacing
+            if delay and delay > 0:
+                time.sleep(min(delay, 0.5))
+
+    # Aggregate results in page order for determinism (non-streaming mode)
+    if on_page is None:
+        for p in range(1, max_pages + 1):
+            items = page_results.get(p, [])
+            if items:
+                all_products_raw.extend(items)
 
     log_callback(
         f"\nAPI Scraping finished for product: '{keyword}'. Total raw products collected: {len(all_products_raw)}"
@@ -838,8 +849,8 @@ def fetch_store_info_batch_basic(
 
                 # Pattern 3: Look for store URL in various locations
                 store_url_patterns = [
-                    r'href="[^"]*aliexpress\.com/store/(\d+)"',  # Direct href pattern
-                    r'//[^"]*\.aliexpress\.com/store/(\d+)',  # Domain pattern
+                    r'href="[^"]*aliexpress\.us/store/(\d+)"',  # Direct href pattern
+                    r'//[^"]*\.aliexpress\.us/store/(\d+)',  # Domain pattern
                     r'storeUrl["\']?\s*:\s*["\']([^"\']+)["\']',  # JSON pattern
                 ]
 
@@ -1111,14 +1122,29 @@ def save_results(
         else "unknown"
     )
     date_str = datetime.datetime.now().strftime("%Y%m%d")
-    unix_timestamp = str(int(time.time()))
 
-    # Create new filename format
-    base_filename = f"aliexpress_{brand_safe}_{date_str}_{unix_timestamp}"
+    # Create filename format without unix timestamp for stability
+    base_filename = f"aliexpress_{brand_safe}_{date_str}"
     json_filename = os.path.join(RESULTS_DIR, f"{base_filename}.json")
     csv_filename = os.path.join(RESULTS_DIR, f"{base_filename}.csv")
 
+    def _backup_if_exists(path: str) -> None:
+        if os.path.exists(path):
+            base, ext = os.path.splitext(path)
+            n = 1
+            while True:
+                candidate = f"{base}.bak{n}{ext}"
+                if not os.path.exists(candidate):
+                    try:
+                        os.rename(path, candidate)
+                    except Exception:
+                        pass
+                    break
+                n += 1
+
     try:
+        _backup_if_exists(json_filename)
+        _backup_if_exists(csv_filename)
         with open(json_filename, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
@@ -1360,6 +1386,12 @@ Examples:
         help="Delay between store retry batches in seconds (default: 2.0)",
     )
 
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream results directly to JSONL and CSV to reduce memory usage",
+    )
+
     return parser
 
 
@@ -1534,42 +1566,130 @@ def main():
             args.keyword, args.proxy_provider
         )
 
-        # Scrape data
-        raw_products, session = scrape_aliexpress_data(
-            keyword=args.keyword,
-            max_pages=args.pages,
-            cookies=fresh_cookies,
-            user_agent=fresh_user_agent,
-            proxy_provider=args.proxy_provider,
-            apply_discount_filter=args.discount,
-            apply_free_shipping_filter=args.free_shipping,
-            min_price=args.min_price,
-            max_price=args.max_price,
-            delay=args.delay,
-        )
+        # Helper: safe overwrite existing file by renaming old to .bakN
+        def ensure_safe_path(path: str) -> str:
+            if not os.path.exists(path):
+                return path
+            base, ext = os.path.splitext(path)
+            n = 1
+            while True:
+                candidate = f"{base}.bak{n}{ext}"
+                if not os.path.exists(candidate):
+                    try:
+                        os.rename(path, candidate)
+                    except Exception:
+                        pass
+                    return path
+                n += 1
 
-        # Check if store information is requested
-        store_fields_requested = any(
-            field in args.fields for field in ["Store Name", "Store ID", "Store URL"]
-        )
+        json_file: str | None = None
+        csv_file: str | None = None
+        extracted_products: list[dict[str, Any]] = []
 
-        if store_fields_requested:
-            print("🏪 Store information requested - fetching store details...")
+        if args.stream:
+            # Streaming mode: write JSONL and CSV row-by-row
+            brand_safe = (
+                "".join(c.lower() if c.isalnum() else "_" for c in args.brand)
+                if args.brand
+                else "unknown"
+            )
+            date_str = datetime.datetime.now().strftime("%Y%m%d")
+            os.makedirs(RESULTS_DIR, exist_ok=True)
+            jsonl_path = os.path.join(
+                RESULTS_DIR, f"aliexpress_{brand_safe}_{date_str}.jsonl"
+            )
+            csv_path = os.path.join(
+                RESULTS_DIR, f"aliexpress_{brand_safe}_{date_str}.csv"
+            )
 
-        # Extract product details
-        extracted_products = extract_product_details(
-            raw_products,
-            args.fields,
-            args.brand,
-            args.proxy_provider,
-            session=session,
-            fetch_store_info=store_fields_requested,
-        )
+            jsonl_path = ensure_safe_path(jsonl_path)
+            csv_path = ensure_safe_path(csv_path)
 
-        # Save results
-        json_file, csv_file = save_results(
-            args.keyword, extracted_products, args.fields, args.brand
-        )
+            # Open writers
+            with (
+                open(jsonl_path, "w", encoding="utf-8") as jf,
+                open(csv_path, "w", encoding="utf-8", newline="") as cf,
+            ):
+                csv_writer = csv.DictWriter(
+                    cf, fieldnames=args.fields, extrasaction="ignore"
+                )
+                csv_writer.writeheader()
+
+                def on_page(page_num: int, items: list[dict[str, Any]]) -> None:
+                    if not items:
+                        return
+                    # Extract per-page with optional store info batch
+                    extracted = extract_product_details(
+                        items,
+                        args.fields,
+                        args.brand,
+                        args.proxy_provider,
+                        session=None,
+                        fetch_store_info=False,
+                        log_callback=print,
+                    )
+                    for row in extracted:
+                        jf.write(json.dumps(row, ensure_ascii=False) + "\n")
+                        csv_writer.writerow(row)
+                    cf.flush()
+                    jf.flush()
+
+                # Execute scraping with streaming callback; session is needed inside callback, so create initial session via a tiny pre-call
+                raw_products, session = scrape_aliexpress_data(
+                    keyword=args.keyword,
+                    max_pages=args.pages,
+                    cookies=fresh_cookies,
+                    user_agent=fresh_user_agent,
+                    proxy_provider=args.proxy_provider,
+                    apply_discount_filter=args.discount,
+                    apply_free_shipping_filter=args.free_shipping,
+                    min_price=args.min_price,
+                    max_price=args.max_price,
+                    delay=args.delay,
+                    on_page=on_page,
+                )
+
+            # After streaming, do not produce JSON array snapshot; report files
+            json_file = jsonl_path
+            csv_file = csv_path
+            extracted_products = []  # Not held in memory
+        else:
+            # Scrape data (non-streaming)
+            raw_products, session = scrape_aliexpress_data(
+                keyword=args.keyword,
+                max_pages=args.pages,
+                cookies=fresh_cookies,
+                user_agent=fresh_user_agent,
+                proxy_provider=args.proxy_provider,
+                apply_discount_filter=args.discount,
+                apply_free_shipping_filter=args.free_shipping,
+                min_price=args.min_price,
+                max_price=args.max_price,
+                delay=args.delay,
+            )
+
+        # Non-streaming: enrich and save
+        if not args.stream:
+            store_fields_requested = any(
+                field in args.fields
+                for field in ["Store Name", "Store ID", "Store URL"]
+            )
+            if store_fields_requested:
+                print("🏪 Store information requested - fetching store details...")
+            # Extract product details
+            extracted_products = extract_product_details(
+                raw_products,
+                args.fields,
+                args.brand,
+                args.proxy_provider,
+                session=session,
+                fetch_store_info=store_fields_requested,
+            )
+
+            # Save results
+            json_file, csv_file = save_results(
+                args.keyword, extracted_products, args.fields, args.brand
+            )
 
         # Auto-retry store information if enabled
         if args.enable_store_retry:
@@ -1593,7 +1713,11 @@ def main():
                 print(f"⚠️ Auto-retry failed: {e}")
 
         print("\n✅ Scraping completed successfully!")
-        print(f"📊 Total products extracted: {len(extracted_products)}")
+        total_count = len(extracted_products)
+        if args.stream and total_count == 0:
+            print("📊 Total products extracted: (streaming mode)")
+        else:
+            print(f"📊 Total products extracted: {total_count}")
         if json_file:
             print(f"💾 JSON file: {json_file}")
         if csv_file:

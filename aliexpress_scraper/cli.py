@@ -9,14 +9,47 @@ This module provides a unified CLI to access all scraper and utility functionali
 Usage:
     python cli.py scrape basic --help
     python cli.py scrape enhanced --help
+    python cli.py scrape multi --help
     python cli.py transform --help
     python cli.py store-retry --help
 """
 
 import argparse
 import asyncio
+import concurrent.futures
+import csv
+import json
+import multiprocessing as mp
+import os
+import subprocess
 import sys
-from typing import Any
+import time
+from typing import Any, Optional, Protocol, cast, runtime_checkable
+
+
+@runtime_checkable
+class MultiScraperArgset(Protocol):
+    """Structural type for multi-query scraper args used by run_single_scraper.
+
+    This mirrors the attributes accessed on argparse.Namespace in multi mode,
+    enabling precise type checking without tying to argparse directly.
+    """
+
+    # Common
+    brand: str
+    pages: int
+    discount: bool
+    free_shipping: bool
+    min_price: Optional[float]
+    max_price: Optional[float]
+    delay: float
+    fields: list[str]
+    proxy_provider: str
+    enable_store_retry: bool
+    store_retry_batch_size: int
+    store_retry_delay: float
+    output_prefix: str
+    scraper_type: str
 
 
 def create_basic_scraper_parser(subparsers: Any) -> None:
@@ -131,15 +164,21 @@ def create_enhanced_scraper_parser(subparsers: Any) -> None:
         description="Enhanced scraper with captcha solving and advanced store retry",
     )
 
-    # Required arguments
-    parser.add_argument("--keyword", "-k", required=True, help="Search keyword")
+    # Required arguments - make keyword and queries-file mutually exclusive
+    keyword_group = parser.add_mutually_exclusive_group(required=True)
+    keyword_group.add_argument("--keyword", "-k", help="Search keyword")
+    keyword_group.add_argument(
+        "--queries-file",
+        "-q",
+        help="Path to text file containing search queries (one per line)",
+    )
     parser.add_argument(
         "--brand", "-b", required=True, help="Brand name to associate with products"
     )
 
     # Optional arguments
     parser.add_argument(
-        "--max-pages", type=int, default=1, help="Maximum pages to scrape"
+        "--max-pages", type=int, default=1, help="Maximum pages to scrape (up to 1000)"
     )
     parser.add_argument(
         "--proxy-provider",
@@ -189,7 +228,166 @@ def create_enhanced_scraper_parser(subparsers: Any) -> None:
         help="Delay between store retry batches in seconds (default: 2.0)",
     )
 
+    # Streaming support for enhanced scraper
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream results directly to JSONL and CSV to reduce memory usage",
+    )
+
     parser.set_defaults(func=run_enhanced_scraper)
+
+
+def create_multi_scraper_parser(subparsers: Any) -> None:
+    """Create parser for multi-query parallel scraping"""
+    parser = subparsers.add_parser(
+        "multi",
+        help="Run parallel scraping for multiple queries from a file",
+        description="Parallel scraping of multiple queries using all available CPU cores",
+    )
+
+    # Required arguments
+    parser.add_argument(
+        "--queries-dir",
+        "-q",
+        required=True,
+        help="Path to text file containing search queries (one per line)",
+    )
+    parser.add_argument(
+        "--brand", "-b", required=True, help="Brand name to associate with products"
+    )
+
+    # Scraper type selection
+    parser.add_argument(
+        "--scraper-type",
+        choices=["basic", "enhanced"],
+        default="basic",
+        help="Type of scraper to use for each query (default: basic). Note: enhanced scraper is currently not supported in multi-query mode due to browser automation complexity.",
+    )
+
+    # Optional arguments for basic scraper
+    parser.add_argument(
+        "--pages",
+        "-p",
+        type=int,
+        default=1,
+        choices=range(1, 61),
+        metavar="[1-60]",
+        help="Number of pages to scrape per query (default: 1, max: 60)",
+    )
+    parser.add_argument(
+        "--discount", "-d", action="store_true", help="Apply 'Big Sale' discount filter"
+    )
+    parser.add_argument(
+        "--free-shipping",
+        "-f",
+        action="store_true",
+        help="Apply 'Free Shipping' filter",
+    )
+    parser.add_argument("--min-price", type=float, help="Minimum price filter")
+    parser.add_argument("--max-price", type=float, help="Maximum price filter")
+    parser.add_argument(
+        "--delay", type=float, default=1.0, help="Delay between requests (default: 1.0)"
+    )
+    parser.add_argument(
+        "--fields",
+        nargs="+",
+        choices=[
+            "Product ID",
+            "Title",
+            "Sale Price",
+            "Original Price",
+            "Discount (%)",
+            "Currency",
+            "Rating",
+            "Orders Count",
+            "Store Name",
+            "Store ID",
+            "Store URL",
+            "Product URL",
+            "Image URL",
+            "Brand",
+        ],
+        default=[
+            "Product ID",
+            "Title",
+            "Sale Price",
+            "Original Price",
+            "Discount (%)",
+            "Currency",
+            "Rating",
+            "Orders Count",
+            "Store Name",
+            "Store ID",
+            "Store URL",
+            "Product URL",
+            "Image URL",
+            "Brand",
+        ],
+        help="Fields to extract (default: all fields)",
+    )
+    parser.add_argument(
+        "--proxy-provider",
+        choices=["oxylabs", "massive"],
+        default="",
+        help="Proxy provider to use (default: None)",
+    )
+    parser.add_argument(
+        "--enable-store-retry",
+        action="store_true",
+        help="Automatically retry missing store information",
+    )
+    parser.add_argument(
+        "--store-retry-batch-size",
+        type=int,
+        default=5,
+        help="Batch size for store retry operations (default: 5)",
+    )
+    parser.add_argument(
+        "--store-retry-delay",
+        type=float,
+        default=2.0,
+        help="Delay between store retry batches (default: 2.0)",
+    )
+
+    # Enhanced scraper specific options
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=1,
+        help="Maximum pages to scrape (for enhanced scraper)",
+    )
+    parser.add_argument(
+        "--disable-captcha-solver",
+        action="store_true",
+        help="Disable automatic captcha solving (for enhanced scraper)",
+    )
+    parser.add_argument(
+        "--captcha-solver-visible",
+        action="store_true",
+        help="Run captcha solver in visible mode (for enhanced scraper)",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Maximum retry attempts (for enhanced scraper)",
+    )
+
+    # Multi-processing options
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Maximum number of parallel workers (default: number of CPU cores)",
+    )
+    parser.add_argument(
+        "--output-prefix",
+        default="aliexpress",
+        help="Prefix for output files (default: aliexpress)",
+    )
+
+    parser.set_defaults(func=run_multi_scraper)
 
 
 def create_transform_parser(subparsers: Any) -> None:
@@ -246,6 +444,7 @@ def create_store_retry_parser(subparsers: Any) -> None:
         "--dry-run", action="store_true", help="Analyze only, don't process"
     )
 
+    # Wire to handler (function is defined below in this module)
     parser.set_defaults(func=run_store_retry)
 
 
@@ -291,40 +490,82 @@ def run_basic_scraper(args: argparse.Namespace) -> None:
 def run_enhanced_scraper(args: argparse.Namespace) -> None:
     """Run the enhanced scraper with provided arguments"""
     try:
-        # Import from the scrapers module
-        from aliexpress_scraper.scrapers.enhanced_scraper import main as enhanced_main
+        # Validate max_pages limit
+        if args.max_pages > 1000:
+            print("❌ Error: Maximum pages limit is 1000")
+            sys.exit(1)
+        if args.max_pages <= 0:
+            print("❌ Error: max-pages must be a positive number")
+            sys.exit(1)
 
-        # Convert args to sys.argv format
-        sys.argv = ["enhanced_scraper.py"]
-        sys.argv.extend(["--keyword", args.keyword])
-        sys.argv.extend(["--brand", args.brand])
-        sys.argv.extend(["--max-pages", str(args.max_pages)])
+        # Import and run EnhancedAliExpressScraper directly (module's __main__ main isn't exported)
+        from aliexpress_scraper.scrapers.enhanced_scraper import (
+            EnhancedAliExpressScraper,
+        )
 
-        if args.proxy_provider:
-            sys.argv.extend(["--proxy-provider", args.proxy_provider])
-        if args.disable_captcha_solver:
-            sys.argv.append("--disable-captcha-solver")
-        if args.captcha_solver_visible:
-            sys.argv.append("--captcha-solver-visible")
-        if args.discount_filter:
-            sys.argv.append("--discount-filter")
-        if args.free_shipping_filter:
-            sys.argv.append("--free-shipping-filter")
-        if args.min_price is not None:
-            sys.argv.extend(["--min-price", str(args.min_price)])
-        if args.max_price is not None:
-            sys.argv.extend(["--max-price", str(args.max_price)])
+        # Handle queries file vs single keyword
+        queries = []
+        if args.queries_file:
+            queries = read_queries_from_file(args.queries_file)
+            if not queries:
+                print("❌ Error: No valid queries found in file")
+                sys.exit(1)
+        else:
+            queries = [args.keyword]
 
-        sys.argv.extend(["--delay", str(args.delay)])
-        sys.argv.extend(["--max-retries", str(args.max_retries)])
+        async def _runner() -> None:
+            scraper = EnhancedAliExpressScraper(
+                proxy_provider=args.proxy_provider,
+                enable_captcha_solver=not args.disable_captcha_solver,
+                captcha_solver_headless=not args.captcha_solver_visible,
+                enable_store_retry=args.enable_store_retry,
+                store_retry_batch_size=args.store_retry_batch_size,
+                store_retry_delay=args.store_retry_delay,
+            )
 
-        if args.enable_store_retry:
-            sys.argv.append("--enable-store-retry")
-        sys.argv.extend(["--store-retry-batch-size", str(args.store_retry_batch_size)])
-        sys.argv.extend(["--store-retry-delay", str(args.store_retry_delay)])
+            all_results: list[dict[str, Any]] = []
+            total_products = 0
 
-        # Run the main function
-        asyncio.run(enhanced_main())
+            for i, query in enumerate(queries, 1):
+                print(f"\n🔍 Processing query {i}/{len(queries)}: '{query}'")
+
+                results = await scraper.run_enhanced_scraper(
+                    keyword=query,
+                    brand=args.brand,
+                    max_pages=args.max_pages,
+                    save_to_file=not getattr(args, "stream", False),
+                    apply_discount_filter=args.discount_filter,
+                    apply_free_shipping_filter=args.free_shipping_filter,
+                    min_price=args.min_price,
+                    max_price=args.max_price,
+                    delay=args.delay,
+                    max_retries=args.max_retries,
+                    stream=getattr(args, "stream", False),
+                )
+
+                if "error" in results:
+                    print(f"❌ Query '{query}' failed: {results['error']}")
+                else:
+                    products = results.get("products", [])
+                    total_products += len(products)
+                    print(f"✅ Query '{query}' completed: {len(products)} products")
+                    if results.get("json_file"):
+                        print(f"💾 JSON: {results['json_file']}")
+                    if results.get("csv_file"):
+                        print(f"📄 CSV: {results['csv_file']}")
+
+                all_results.append(results)
+
+            # Summary for multiple queries
+            if len(queries) > 1:
+                successful_queries = sum(1 for r in all_results if "error" not in r)
+                print(f"\n📊 Final Summary:")
+                print(f"   Total queries: {len(queries)}")
+                print(f"   Successful: {successful_queries}")
+                print(f"   Failed: {len(queries) - successful_queries}")
+                print(f"   Total products: {total_products}")
+
+        asyncio.run(_runner())
 
     except Exception as e:
         print(f"❌ Error running enhanced scraper: {e}")
@@ -381,6 +622,310 @@ def run_store_retry(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def read_queries_from_file(file_path: str) -> list[str]:
+    """Read search queries from a text file, one per line"""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            queries = [line.strip() for line in f if line.strip()]
+        return queries
+    except FileNotFoundError:
+        print(f"❌ Error: Queries file not found: {file_path}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error reading queries file: {e}")
+        sys.exit(1)
+
+
+def generate_output_filename(query: str, prefix: str = "aliexpress") -> str:
+    """Generate a stable output filename for a query (no timestamp)."""
+    # Clean the query for filename use
+    clean_query = "".join(
+        c for c in query if c.isalnum() or c in (" ", "-", "_")
+    ).rstrip()
+    clean_query = clean_query.replace(" ", "_").lower()
+
+    return f"{prefix}_{clean_query}.json"
+
+
+def run_single_scraper(
+    args: tuple[str, MultiScraperArgset, str],
+) -> tuple[str, str, bool]:
+    """Run a single scraper instance for one query"""
+    query, scraper_args, scraper_type = args
+
+    try:
+        print(f"🔄 Starting scraper for query: '{query}'")
+
+        # Keep track of existing files before running scraper
+        results_dir: str = "results"
+        existing_files: set[str] = set()
+        if os.path.exists(results_dir):
+            existing_files = set(os.listdir(results_dir))
+
+        if scraper_type == "basic":
+            from aliexpress_scraper.core.scraper import main as scraper_main
+
+            # Prepare sys.argv for the scraper
+            original_argv = sys.argv.copy()
+            sys.argv = ["scraper.py"]
+            sys.argv.extend(["--keyword", query])
+            sys.argv.extend(["--brand", scraper_args.brand])
+            sys.argv.extend(["--pages", str(scraper_args.pages)])
+
+            if scraper_args.discount:
+                sys.argv.append("--discount")
+            if scraper_args.free_shipping:
+                sys.argv.append("--free-shipping")
+            if scraper_args.min_price is not None:
+                sys.argv.extend(["--min-price", str(scraper_args.min_price)])
+            if scraper_args.max_price is not None:
+                sys.argv.extend(["--max-price", str(scraper_args.max_price)])
+
+            sys.argv.extend(["--delay", str(scraper_args.delay)])
+            sys.argv.extend(["--fields"] + scraper_args.fields)
+
+            if scraper_args.proxy_provider:
+                sys.argv.extend(["--proxy-provider", scraper_args.proxy_provider])
+            if scraper_args.enable_store_retry:
+                sys.argv.append("--enable-store-retry")
+            sys.argv.extend(
+                ["--store-retry-batch-size", str(scraper_args.store_retry_batch_size)]
+            )
+            sys.argv.extend(
+                ["--store-retry-delay", str(scraper_args.store_retry_delay)]
+            )
+
+            # Run the scraper
+            scraper_main()
+            sys.argv = original_argv
+
+        elif scraper_type == "enhanced":
+            # Enhanced scraper in multi-query mode is currently not supported due to complexity
+            # of running async browser automation in parallel processes
+            print(
+                f"⚠️  Enhanced scraper not supported in multi-query mode for query: '{query}'"
+            )
+            print(
+                f"💡 Recommendation: Use --scraper-type basic for multi-query operations"
+            )
+            print(
+                f'   Or run enhanced scraper individually: python main.py scrape enhanced --keyword "{query}" --brand "{scraper_args.brand}"'
+            )
+            return query, "", False
+
+        # Find the newly created JSON and CSV files
+        new_json_file: Optional[str] = None
+        new_csv_file: Optional[str] = None
+        if os.path.exists(results_dir):
+            current_files: set[str] = set(os.listdir(results_dir))
+            new_files: set[str] = current_files - existing_files
+            json_files: list[str] = [f for f in new_files if f.endswith(".json")]
+            csv_files: list[str] = [f for f in new_files if f.endswith(".csv")]
+
+            if json_files:
+                # Get the most recently created JSON file
+                json_files.sort(
+                    key=lambda x: os.path.getmtime(os.path.join(results_dir, x)),
+                    reverse=True,
+                )
+                new_json_file = json_files[0]
+            # Prefer the CSV with the same original base name as the JSON, fall back to latest CSV
+            if new_json_file:
+                candidate_csv = os.path.splitext(new_json_file)[0] + ".csv"
+                if candidate_csv in current_files:
+                    new_csv_file = candidate_csv
+                elif csv_files:
+                    csv_files.sort(
+                        key=lambda x: os.path.getmtime(os.path.join(results_dir, x)),
+                        reverse=True,
+                    )
+                    new_csv_file = csv_files[0]
+
+        if new_json_file:
+            # Generate new filename based on query (no timestamp)
+            new_json_filename: str = generate_output_filename(
+                query, scraper_args.output_prefix
+            )
+            base_no_ext, _ = os.path.splitext(new_json_filename)
+            new_csv_filename: str = f"{base_no_ext}.csv"
+
+            old_json_path: str = os.path.join(results_dir, new_json_file)
+            new_json_path: str = os.path.join(results_dir, new_json_filename)
+
+            # Rename the file to include the query
+            os.rename(old_json_path, new_json_path)
+
+            # Try to rename the corresponding CSV to match the same base name
+            if new_csv_file:
+                old_csv_path: str = os.path.join(results_dir, new_csv_file)
+                new_csv_path: str = os.path.join(results_dir, new_csv_filename)
+                try:
+                    os.rename(old_csv_path, new_csv_path)
+                except Exception as e:
+                    print(
+                        f"⚠️  Warning: Could not rename CSV file '{new_csv_file}' to '{new_csv_filename}': {e}"
+                    )
+            else:
+                print("⚠️  Warning: No CSV output file found to match the renamed JSON")
+
+            print(f"✅ Completed scraping for query: '{query}' -> {new_json_filename}")
+            return query, new_json_filename, True
+        else:
+            print(f"⚠️  Warning: No JSON output file found for query: '{query}'")
+            return query, "", False
+
+    except subprocess.TimeoutExpired:
+        print(f"⏱️  Timeout: Scraper for query '{query}' exceeded 15 minutes")
+        return query, "", False
+    except Exception as e:
+        print(f"❌ Error scraping query '{query}': {e}")
+        return query, "", False
+
+
+def merge_json_results_to_csv(
+    json_files: list[str], output_prefix: str = "aliexpress"
+) -> str:
+    """Merge multiple JSON result files into a single CSV and emit a merged JSON as well."""
+    try:
+        # Output filenames without timestamps for stability
+        csv_filename = f"{output_prefix}_merged.csv"
+        json_merged_filename = f"{output_prefix}_merged.json"
+
+        all_data: list[dict[str, Any]] = []
+
+        # Read all JSON files
+        for json_file in json_files:
+            if os.path.exists(json_file):
+                try:
+                    with open(json_file, "r", encoding="utf-8") as f:
+                        data_obj: Any = json.load(f)
+                        if isinstance(data_obj, list):
+                            for d in cast(list[Any], data_obj):
+                                if isinstance(d, dict):
+                                    all_data.append(cast(dict[str, Any], d))
+                        elif isinstance(data_obj, dict):
+                            all_data.append(cast(dict[str, Any], data_obj))
+                except Exception as e:
+                    print(f"⚠️  Warning: Could not read {json_file}: {e}")
+            else:
+                print(f"⚠️  Warning: File not found: {json_file}")
+
+        if not all_data:
+            print("❌ No data found in any JSON files")
+            return ""
+
+        # Get all unique keys for CSV headers
+        all_keys: set[str] = set()
+        for item in all_data:
+            all_keys.update(item.keys())
+
+        fieldnames: list[str] = sorted(list(all_keys))
+
+        # Write merged JSON
+        os.makedirs("results", exist_ok=True)
+        json_path = os.path.join("results", json_merged_filename)
+        with open(json_path, "w", encoding="utf-8") as jf:
+            json.dump(all_data, jf, ensure_ascii=False, indent=2)
+
+        # Write merged CSV
+        csv_path = os.path.join("results", csv_filename)
+        with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for item in all_data:
+                writer.writerow(item)
+
+        print(f"📄 Merged results saved to: {csv_path}")
+        print(f"💾 Merged JSON saved to: {json_path}")
+        print(f"📊 Total records: {len(all_data)}")
+        return csv_path
+
+    except Exception as e:
+        print(f"❌ Error merging results: {e}")
+        return ""
+
+
+def run_multi_scraper(args: argparse.Namespace) -> None:
+    """Run parallel scraping for multiple queries"""
+    try:
+        print(f"🚀 Starting parallel scraping from: {args.queries_dir}")
+
+        # Read queries from file
+        queries: list[str] = read_queries_from_file(args.queries_dir)
+        if not queries:
+            print("❌ No queries found in file")
+            sys.exit(1)
+
+        print(f"📋 Found {len(queries)} queries to process")
+        print(f"🔧 Scraper type: {args.scraper_type}")
+
+        # Determine number of workers
+        max_workers: int = args.max_workers if args.max_workers else mp.cpu_count()
+        print(f"⚙️  Using {max_workers} parallel workers")
+
+        # Prepare arguments for each scraper
+        # Cast args to MultiScraperArgset for typing purposes
+        typed_args: MultiScraperArgset = cast(MultiScraperArgset, args)
+        scraper_tasks: list[tuple[str, MultiScraperArgset, str]] = [
+            (query, typed_args, args.scraper_type) for query in queries
+        ]
+
+        # Run scrapers in parallel using ProcessPoolExecutor
+        results: list[tuple[str, bool]] = []
+        json_files: list[str] = []
+
+        start_time = time.time()
+
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers
+        ) as executor:
+            # Submit all tasks
+            future_to_query: dict[
+                concurrent.futures.Future[tuple[str, str, bool]], str
+            ] = {
+                executor.submit(run_single_scraper, task): task[0]
+                for task in scraper_tasks
+            }
+
+            # Process completed tasks
+            for future in concurrent.futures.as_completed(future_to_query):
+                query: str = future_to_query[future]
+                try:
+                    query_result, output_file, success = future.result()
+                    results.append((query_result, success))
+                    if success and output_file:
+                        json_files.append(os.path.join("results", output_file))
+                except Exception as e:
+                    print(f"❌ Exception for query '{query}': {e}")
+                    results.append((query, False))
+
+        end_time = time.time()
+
+        # Print summary
+        successful: int = sum(1 for _, success in results if success)
+        failed: int = len(results) - successful
+
+        print(f"\n📈 Scraping Summary:")
+        print(f"   ✅ Successful: {successful}")
+        print(f"   ❌ Failed: {failed}")
+        print(f"   ⏱️  Total time: {end_time - start_time:.2f} seconds")
+
+        # Merge results into CSV if we have successful results
+        if json_files:
+            print(f"\n🔄 Merging {len(json_files)} result files...")
+            csv_file = merge_json_results_to_csv(json_files, args.output_prefix)
+            if csv_file:
+                print(f"🎉 Final merged results: {csv_file}")
+            else:
+                print("❌ Failed to create merged CSV file")
+        else:
+            print("⚠️  No successful results to merge")
+
+    except Exception as e:
+        print(f"❌ Error in multi-scraper: {e}")
+        sys.exit(1)
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the main CLI parser"""
     parser = argparse.ArgumentParser(
@@ -391,8 +936,14 @@ Examples:
   # Basic scraping
   %(prog)s scrape basic --keyword "gaming mouse" --brand "Logitech" --pages 3
 
-  # Enhanced scraping with captcha solving
+  # Enhanced scraping with captcha solving (single keyword)
   %(prog)s scrape enhanced --keyword "mechanical keyboard" --brand "Razer" --enable-store-retry
+
+  # Enhanced scraping with query list file
+  %(prog)s scrape enhanced --queries-file queries.txt --brand "InStyler" --max-pages 2 --stream
+
+  # Multi-query parallel scraping (basic scraper only)
+  %(prog)s scrape multi --queries-dir queries/instyler.txt --brand "InStyler" --scraper-type basic
 
   # Transform data to listing format
   %(prog)s transform aliexpress_data.json listings.csv --category "Electronics"
@@ -428,6 +979,7 @@ Examples:
     # Add scraper parsers
     create_basic_scraper_parser(scrape_subparsers)
     create_enhanced_scraper_parser(scrape_subparsers)
+    create_multi_scraper_parser(scrape_subparsers)
 
     # Add utility parsers
     create_transform_parser(subparsers)
