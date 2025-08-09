@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """
 Enhanced AliExpress Scraper with Captcha Solver Integration
-Extends the original scraper with automatic captcha solving capabilities
+===========================================================
+
+Extends the original scraper with automatic captcha solving capabilities,
+intelligent retry logic, and comprehensive logging.
+
+Features:
+- Automatic captcha detection and solving
+- Session caching with expiration management  
+- Enhanced store information extraction with retry
+- Streaming mode for memory-efficient processing
+- Comprehensive logging with progress tracking
+- Proxy support for improved reliability
 """
 
 import argparse
@@ -102,21 +113,23 @@ class EnhancedAliExpressScraper:
         Returns:
             Tuple of (cookies, user_agent)
         """
-        self.log_callback(f"Initializing enhanced session for: '{keyword}'")
+        self.log_callback(f"🔧 Initializing enhanced session for keyword: '{keyword}'")
 
         # Validate proxy credentials if needed
         if self.proxy_provider:
+            self.log_callback(f"🌐 Using proxy provider: {self.proxy_provider}")
             validate_proxy_credentials(self.proxy_provider)
 
         # Check cache first
         cached_data = self._check_cache()
         if cached_data:
+            self.log_callback("💾 Using cached session data")
             return cached_data["cookies"], cached_data["user_agent"]
 
         # If captcha solver is disabled, fall back to original method
         if not self.enable_captcha_solver:
             self.log_callback(
-                "Captcha solver disabled, using original session initialization"
+                "⚠️  Captcha solver disabled - using standard session initialization"
             )
             return initialize_session_data(
                 keyword, self.proxy_provider, self.log_callback
@@ -124,10 +137,11 @@ class EnhancedAliExpressScraper:
 
         # Use captcha solver for session initialization
         search_url = f"https://www.aliexpress.us/w/wholesale-{quote_plus(keyword)}.html"
+        self.log_callback(f"🔗 Target URL: {search_url}")
 
         try:
             self.log_callback(
-                "🛡️ Starting session initialization with captcha solver..."
+                "🛡️  Starting captcha-aware session initialization..."
             )
 
             (
@@ -148,14 +162,14 @@ class EnhancedAliExpressScraper:
                 self._cache_session_data(cookies, user_agent)
 
                 self.log_callback(
-                    f"✅ Captcha solver session initialized successfully!"
+                    f"✅ Session initialized successfully via captcha solver"
                 )
-                self.log_callback(f"📊 Extracted {len(cookies)} cookies")
+                self.log_callback(f"📊 Retrieved {len(cookies)} cookies from session")
 
                 return cookies, user_agent
             else:
                 self.log_callback(
-                    "⚠️ Captcha solver failed, falling back to original method"
+                    "⚠️  Captcha solver failed - falling back to standard method"
                 )
                 return initialize_session_data(
                     keyword, self.proxy_provider, self.log_callback
@@ -163,9 +177,9 @@ class EnhancedAliExpressScraper:
 
         except Exception as e:
             self.log_callback(
-                f"❌ Error in captcha solver session initialization: {str(e)}"
+                f"❌ Captcha solver initialization error: {str(e)}"
             )
-            self.log_callback("🔄 Falling back to original session initialization")
+            self.log_callback("🔄 Falling back to standard session initialization")
             return initialize_session_data(
                 keyword, self.proxy_provider, self.log_callback
             )
@@ -173,6 +187,7 @@ class EnhancedAliExpressScraper:
     def _check_cache(self) -> dict[str, Any] | None:
         """Check for valid cached session data"""
         if not os.path.exists(SESSION_CACHE_FILE):
+            self.log_callback("📁 No session cache file found")
             return None
 
         try:
@@ -190,11 +205,11 @@ class EnhancedAliExpressScraper:
                 return cached_data
             else:
                 self.log_callback(
-                    f"⏰ Cached session data expired (age: {int(cache_age)}s)"
+                    f"⏰ Session cache expired (age: {int(cache_age)}s, max: {CACHE_EXPIRATION_SECONDS}s)"
                 )
 
         except (json.JSONDecodeError, FileNotFoundError, KeyError) as e:
-            self.log_callback(f"⚠️ Error reading cache: {e}")
+            self.log_callback(f"⚠️  Error reading session cache: {e}")
 
         return None
 
@@ -210,10 +225,10 @@ class EnhancedAliExpressScraper:
             with open(SESSION_CACHE_FILE, "w") as f:
                 json.dump(cache_content, f, indent=4)
 
-            self.log_callback("💾 Session data cached successfully")
+            self.log_callback(f"💾 Session data cached successfully ({len(cookies)} cookies)")
 
         except IOError as e:
-            self.log_callback(f"⚠️ Error saving session cache: {e}")
+            self.log_callback(f"⚠️  Failed to save session cache: {e}")
 
     async def scrape_with_captcha_handling(
         self,
@@ -249,7 +264,7 @@ class EnhancedAliExpressScraper:
         while attempt < max_retries:
             try:
                 self.log_callback(
-                    f"🚀 Starting scrape attempt {attempt + 1}/{max_retries}"
+                    f"🚀 Starting scrape attempt {attempt + 1}/{max_retries} for keyword: '{keyword}'"
                 )
 
                 # Get session data (with captcha solving if needed)
@@ -258,6 +273,8 @@ class EnhancedAliExpressScraper:
                     user_agent,
                 ) = await self.initialize_session_with_captcha_solving(keyword)
 
+                self.log_callback(f"🔍 Scraping {max_pages} page(s) for products...")
+                
                 # Perform the actual scraping
                 raw_products, session = scrape_aliexpress_data(
                     keyword=keyword,
@@ -272,6 +289,8 @@ class EnhancedAliExpressScraper:
                     delay=delay,
                     log_callback=self.log_callback,
                 )
+
+                self.log_callback(f"📦 Retrieved {len(raw_products)} raw products from API")
 
                 # Use the original scraper's detailed extraction function
                 from ..core.scraper import extract_product_details
@@ -294,6 +313,8 @@ class EnhancedAliExpressScraper:
                     "Brand",
                 ]
 
+                self.log_callback("🏗️  Extracting detailed product information...")
+                
                 # Extract detailed product information with store data
                 extracted_products = extract_product_details(
                     raw_products=raw_products,
@@ -304,6 +325,8 @@ class EnhancedAliExpressScraper:
                     fetch_store_info=True,  # Enable store info fetching
                     log_callback=self.log_callback,
                 )
+
+                self.log_callback(f"✅ Extracted {len(extracted_products)} detailed products")
 
                 # Format results to match expected structure
                 # Don't include session object in results as it's not JSON serializable
@@ -317,26 +340,26 @@ class EnhancedAliExpressScraper:
                 # Check if we got valid results
                 if self._validate_results(results):
                     self.log_callback(
-                        f"✅ Scraping successful on attempt {attempt + 1}"
+                        f"✅ Scraping completed successfully on attempt {attempt + 1}"
                     )
                     return results
                 else:
                     self.log_callback(
-                        f"⚠️ Invalid results on attempt {attempt + 1}, retrying..."
+                        f"⚠️  Invalid results on attempt {attempt + 1} - retrying..."
                     )
 
             except Exception as e:
-                self.log_callback(f"❌ Error on attempt {attempt + 1}: {str(e)}")
+                self.log_callback(f"❌ Scraping attempt {attempt + 1} failed: {str(e)}")
 
             attempt += 1
 
             if attempt < max_retries:
                 self.log_callback(
-                    f"🔄 Retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})"
+                    f"⏳ Retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})"
                 )
                 await asyncio.sleep(5)
 
-        self.log_callback(f"❌ Scraping failed after {max_retries} attempts")
+        self.log_callback(f"❌ All scraping attempts failed after {max_retries} retries")
         return {
             "error": f"Scraping failed after {max_retries} attempts",
             "products": [],
@@ -348,16 +371,23 @@ class EnhancedAliExpressScraper:
 
         # Check if we have products and they look valid
         if not products or len(products) == 0:
+            self.log_callback("⚠️  No products found in results")
             return False
 
         # Check if products have essential fields
+        valid_count = 0
         for product in products[:3]:  # Check first 3 products
             if not isinstance(product, dict):
-                return False
+                continue
             product_dict = cast(dict[str, Any], product)
-            if not product_dict.get("Title") and not product_dict.get("title"):
-                return False
+            if product_dict.get("Title") or product_dict.get("title"):
+                valid_count += 1
 
+        if valid_count == 0:
+            self.log_callback("⚠️  No valid products found (missing titles)")
+            return False
+
+        self.log_callback(f"✅ Results validation passed ({len(products)} products)")
         return True
 
     async def run_enhanced_scraper(
@@ -383,6 +413,7 @@ class EnhancedAliExpressScraper:
             Scraping results dictionary
         """
         self.log_callback(f"🚀 Starting enhanced scraper for keyword: '{keyword}'")
+        self.log_callback(f"📊 Configuration: {max_pages} pages, streaming: {stream}, save: {save_to_file}")
 
         # Common fields for extraction/saving
         all_fields = [
@@ -403,6 +434,7 @@ class EnhancedAliExpressScraper:
         ]
 
         if stream:
+            self.log_callback("🌊 Starting streaming mode scraper...")
             # Streaming mode: produce a JSON array incrementally + CSV row-by-row
             from ..core.scraper import RESULTS_DIR, extract_product_details
 
@@ -438,8 +470,11 @@ class EnhancedAliExpressScraper:
             )
             json_path = ensure_safe_path(json_path)
             csv_path = ensure_safe_path(csv_path)
+            
+            self.log_callback(f"📁 Output files: JSON={os.path.basename(json_path)}, CSV={os.path.basename(csv_path)}")
 
             # Initialize session (captcha-aware)
+            self.log_callback("🔧 Initializing session for streaming...")
             cookies, user_agent = await self.initialize_session_with_captcha_solving(
                 keyword
             )
@@ -448,6 +483,7 @@ class EnhancedAliExpressScraper:
             first_row = True
 
             # We write '[' then objects separated by commas, then ']' at end
+            self.log_callback("📝 Starting streaming data write...")
             with (
                 open(json_path, "w", encoding="utf-8") as jf,
                 open(csv_path, "w", encoding="utf-8", newline="") as cf,
@@ -461,7 +497,10 @@ class EnhancedAliExpressScraper:
                 def on_page(page_num: int, items: list[dict[str, Any]]) -> None:
                     nonlocal total_written, first_row
                     if not items:
+                        self.log_callback(f"📄 Page {page_num}: No items found")
                         return
+                    
+                    self.log_callback(f"📄 Page {page_num}: Processing {len(items)} items...")
                     extracted = extract_product_details(
                         items,
                         all_fields,
@@ -481,8 +520,10 @@ class EnhancedAliExpressScraper:
                         total_written += 1
                     cf.flush()
                     jf.flush()
+                    self.log_callback(f"📄 Page {page_num}: Wrote {len(extracted)} products to files")
 
                 # Run underlying scrape in executor (keeps event loop free)
+                self.log_callback("⚡ Starting parallel page fetching...")
                 await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: scrape_aliexpress_data(
@@ -508,6 +549,7 @@ class EnhancedAliExpressScraper:
                 # Close JSON array
                 jf.write("\n]\n")
 
+            self.log_callback(f"✅ Streaming completed: {total_written} products written to files")
             return {
                 "products": [],  # Not held in memory
                 "json_file": json_path,
@@ -517,16 +559,20 @@ class EnhancedAliExpressScraper:
             }
 
         # Non-streaming: run regular enhanced flow and save if requested
+        self.log_callback("🔄 Starting standard (non-streaming) scraping mode...")
         results = await self.scrape_with_captcha_handling(
             keyword=keyword, brand=brand, max_pages=max_pages, **kwargs
         )
 
         if results.get("error"):
+            self.log_callback(f"❌ Scraping failed: {results['error']}")
             return results
 
         products = results.get("products", [])
+        self.log_callback(f"📦 Retrieved {len(products)} products for processing")
 
         if save_to_file and products:
+            self.log_callback("💾 Saving results to files...")
             from ..core.scraper import RESULTS_DIR, save_results
 
             os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -541,8 +587,14 @@ class EnhancedAliExpressScraper:
 
             results["json_file"] = json_file
             results["csv_file"] = csv_file
+            
+            if json_file:
+                self.log_callback(f"📄 Saved JSON: {os.path.basename(json_file)}")
+            if csv_file:
+                self.log_callback(f"📄 Saved CSV: {os.path.basename(csv_file)}")
 
             if self.enable_store_retry and json_file:
+                self.log_callback("🏪 Starting automatic store information retry...")
                 await self._auto_retry_store_info(json_file, products)
 
         return results
@@ -561,6 +613,8 @@ class EnhancedAliExpressScraper:
             # Import the store retry functionality
             from ..store.store_integration import get_store_integration
 
+            self.log_callback("🔍 Analyzing products for missing store information...")
+            
             # Analyze products for missing store info
             missing_products: list[dict[str, Any]] = []
             for product in products:
@@ -582,7 +636,10 @@ class EnhancedAliExpressScraper:
                     missing_products.append(product)
 
             if not missing_products:
+                self.log_callback("✅ All products already have complete store information")
                 return
+
+            self.log_callback(f"🔄 Found {len(missing_products)} products needing store info retry")
 
             # Extract URLs for retry with explicit typing
             urls_to_retry: list[str] = [
@@ -590,36 +647,46 @@ class EnhancedAliExpressScraper:
             ]
 
             if not urls_to_retry:
+                self.log_callback("⚠️  No valid product URLs found for retry")
                 return
+
+            self.log_callback(f"🏪 Retrying store info for {len(urls_to_retry)} products...")
 
             # Get store integration and retry
             integration = get_store_integration(proxy_provider=self.proxy_provider)
 
             # Process in batches
             all_retry_results: dict[str, Any] = {}
+            total_batches = (len(urls_to_retry) + self.store_retry_batch_size - 1) // self.store_retry_batch_size
 
             for i in range(0, len(urls_to_retry), self.store_retry_batch_size):
+                batch_num = (i // self.store_retry_batch_size) + 1
                 batch_urls: list[str] = urls_to_retry[
                     i : i + self.store_retry_batch_size
                 ]
+                
+                self.log_callback(f"📦 Processing batch {batch_num}/{total_batches} ({len(batch_urls)} URLs)...")
 
                 try:
                     batch_results = await integration.fetch_store_info_enhanced(
                         batch_urls
                     )
                     all_retry_results.update(batch_results)
+                    self.log_callback(f"✅ Batch {batch_num} completed successfully")
 
-                except Exception:
-                    pass  # Silent failure
+                except Exception as e:
+                    self.log_callback(f"⚠️  Batch {batch_num} failed: {str(e)}")
 
                 # Delay between batches
                 if (
                     i + self.store_retry_batch_size < len(urls_to_retry)
                     and self.store_retry_delay > 0
                 ):
+                    self.log_callback(f"⏳ Waiting {self.store_retry_delay}s before next batch...")
                     await asyncio.sleep(self.store_retry_delay)
 
             # Update products with retry results
+            self.log_callback("🔄 Updating products with retry results...")
             updated_products: list[dict[str, Any]] = []
             successful_updates = 0
 
@@ -659,6 +726,7 @@ class EnhancedAliExpressScraper:
 
             # Save updated results if there were successful updates
             if successful_updates > 0:
+                self.log_callback(f"💾 Updating files with {successful_updates} enhanced products...")
                 # Update the JSON file with new data
                 import json
 
@@ -673,15 +741,20 @@ class EnhancedAliExpressScraper:
 
                         df = pd.DataFrame(updated_products)
                         df.to_csv(csv_file, index=False)
+                        self.log_callback("✅ Both JSON and CSV files updated successfully")
                     except ImportError:
-                        pass  # Silent failure
+                        self.log_callback("⚠️  CSV update skipped (pandas not available)")
                     except Exception:
-                        pass  # Silent failure
+                        self.log_callback("⚠️  CSV update failed")
+                else:
+                    self.log_callback("✅ JSON file updated successfully")
+            else:
+                self.log_callback("ℹ️  No store information could be retrieved for any products")
 
         except ImportError:
-            pass  # Silent failure
-        except Exception:
-            pass  # Silent failure
+            self.log_callback("⚠️  Store integration not available - skipping auto-retry")
+        except Exception as e:
+            self.log_callback(f"⚠️  Auto-retry failed: {str(e)}")
 
     async def solve_captcha_for_product_details(
         self, product_urls: list[str]
@@ -696,11 +769,11 @@ class EnhancedAliExpressScraper:
             Dictionary mapping URLs to session data
         """
         if not self.enable_captcha_solver:
-            self.log_callback("Captcha solver disabled for product details")
+            self.log_callback("⚠️  Captcha solver disabled - skipping product detail processing")
             return {}
 
         self.log_callback(
-            f"🛡️ Processing {len(product_urls)} product URLs for captcha solving..."
+            f"🛡️  Processing {len(product_urls)} product URLs for captcha solving..."
         )
 
         results: dict[str, dict[str, Any]] = {}
@@ -720,9 +793,9 @@ class EnhancedAliExpressScraper:
 
                     if success:
                         results[url] = session_data
-                        self.log_callback(f"✅ Product {i} processed successfully")
+                        self.log_callback(f"✅ Product {i} captcha solved successfully")
                     else:
-                        self.log_callback(f"⚠️ Failed to process product {i}")
+                        self.log_callback(f"⚠️  Product {i} captcha solving failed")
 
                     # Small delay between products
                     if i < len(product_urls):
@@ -731,8 +804,9 @@ class EnhancedAliExpressScraper:
                 except Exception as e:
                     self.log_callback(f"❌ Error processing product {i}: {str(e)}")
 
+        success_rate = (len(results) / len(product_urls) * 100) if product_urls else 0
         self.log_callback(
-            f"📊 Successfully processed {len(results)}/{len(product_urls)} product URLs"
+            f"📊 Captcha solving completed: {len(results)}/{len(product_urls)} successful ({success_rate:.1f}%)"
         )
         return results
 
@@ -874,6 +948,13 @@ if __name__ == "__main__":
 
         print("🚀 Enhanced AliExpress Scraper with Captcha Solving")
         print("=" * 60)
+        print(f"🔍 Keyword: {args.keyword}")
+        print(f"🏷️  Brand: {args.brand}") 
+        print(f"📄 Max pages: {args.max_pages}")
+        print(f"🌐 Proxy: {args.proxy_provider if args.proxy_provider else 'None'}")
+        print(f"🛡️  Captcha solver: {'Enabled' if not args.disable_captcha_solver else 'Disabled'}")
+        print(f"🏪 Store retry: {'Enabled' if args.enable_store_retry else 'Disabled'}")
+        print("-" * 60)
 
         # Create scraper instance
         scraper = EnhancedAliExpressScraper(
@@ -901,18 +982,24 @@ if __name__ == "__main__":
 
         if "error" not in results:
             products = results.get("products", [])
+            total_products = len(products) if not results.get("stream") else results.get("total_streamed", 0)
+            
             print(
-                f"\n✅ Successfully scraped {len(products)} products with detailed information!"
+                f"\n✅ Enhanced scraping completed successfully!"
             )
+            print(f"📊 Total products scraped: {total_products}")
 
             # Print file paths if saved
             if results.get("json_file"):
-                print(f"📄 JSON saved to: {results['json_file']}")
+                print(f"� JSON file: {os.path.basename(results['json_file'])}")
             if results.get("csv_file"):
-                print(f"📄 CSV saved to: {results['csv_file']}")
+                print(f"📄 CSV file: {os.path.basename(results['csv_file'])}")
+                
+            if results.get("stream"):
+                print("🌊 Results were streamed directly to files")
 
         else:
-            print(f"\n❌ Scraping failed: {results['error']}")
+            print(f"\n❌ Enhanced scraping failed: {results['error']}")
 
     # Run the async main function
     asyncio.run(main())

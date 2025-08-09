@@ -26,6 +26,8 @@ import sys
 import time
 from typing import Any, Optional, Protocol, cast, runtime_checkable
 
+from .utils.logger import ScraperLogger
+
 
 @runtime_checkable
 class MultiScraperArgset(Protocol):
@@ -450,6 +452,8 @@ def create_store_retry_parser(subparsers: Any) -> None:
 
 def run_basic_scraper(args: argparse.Namespace) -> None:
     """Run the basic scraper with provided arguments"""
+    logger = ScraperLogger("CLI.Basic")
+    
     try:
         # Import from the core module
         from aliexpress_scraper.core.scraper import main as scraper_main
@@ -479,23 +483,27 @@ def run_basic_scraper(args: argparse.Namespace) -> None:
         sys.argv.extend(["--store-retry-batch-size", str(args.store_retry_batch_size)])
         sys.argv.extend(["--store-retry-delay", str(args.store_retry_delay)])
 
+        logger.start("Basic scraper execution", f"keyword: '{args.keyword}', brand: '{args.brand}'")
+        
         # Run the main function
         scraper_main()
 
     except Exception as e:
-        print(f"❌ Error running basic scraper: {e}")
+        logger.error("Basic scraper execution failed", str(e))
         sys.exit(1)
 
 
 def run_enhanced_scraper(args: argparse.Namespace) -> None:
     """Run the enhanced scraper with provided arguments"""
+    logger = ScraperLogger("CLI.Enhanced")
+    
     try:
         # Validate max_pages limit
         if args.max_pages > 1000:
-            print("❌ Error: Maximum pages limit is 1000")
+            logger.error("Page limit exceeded", "Maximum pages limit is 1000")
             sys.exit(1)
         if args.max_pages <= 0:
-            print("❌ Error: max-pages must be a positive number")
+            logger.error("Invalid page count", "max-pages must be a positive number")
             sys.exit(1)
 
         # Import and run EnhancedAliExpressScraper directly (module's __main__ main isn't exported)
@@ -508,7 +516,7 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
         if args.queries_file:
             queries = read_queries_from_file(args.queries_file)
             if not queries:
-                print("❌ Error: No valid queries found in file")
+                logger.error("Query processing failed", "No valid queries found in file")
                 sys.exit(1)
         else:
             queries = [args.keyword]
@@ -527,7 +535,7 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
             total_products = 0
 
             for i, query in enumerate(queries, 1):
-                print(f"\n🔍 Processing query {i}/{len(queries)}: '{query}'")
+                logger.progress("Query processing", f"{i}/{len(queries)}: '{query}'")
 
                 results = await scraper.run_enhanced_scraper(
                     keyword=query,
@@ -544,36 +552,39 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
                 )
 
                 if "error" in results:
-                    print(f"❌ Query '{query}' failed: {results['error']}")
+                    logger.error(f"Query '{query}' failed", results["error"])
                 else:
                     products = results.get("products", [])
                     total_products += len(products)
-                    print(f"✅ Query '{query}' completed: {len(products)} products")
+                    logger.success(f"Query '{query}' completed", f"{len(products)} products")
                     if results.get("json_file"):
-                        print(f"💾 JSON: {results['json_file']}")
+                        logger.save("JSON saved", results["json_file"])
                     if results.get("csv_file"):
-                        print(f"📄 CSV: {results['csv_file']}")
+                        logger.save("CSV saved", results["csv_file"])
 
                 all_results.append(results)
 
             # Summary for multiple queries
             if len(queries) > 1:
                 successful_queries = sum(1 for r in all_results if "error" not in r)
-                print(f"\n📊 Final Summary:")
-                print(f"   Total queries: {len(queries)}")
-                print(f"   Successful: {successful_queries}")
-                print(f"   Failed: {len(queries) - successful_queries}")
-                print(f"   Total products: {total_products}")
+                logger.summary([
+                    ("Total queries", len(queries)),
+                    ("Successful", successful_queries),
+                    ("Failed", len(queries) - successful_queries),
+                    ("Total products", total_products),
+                ])
 
         asyncio.run(_runner())
 
     except Exception as e:
-        print(f"❌ Error running enhanced scraper: {e}")
+        logger.error("Enhanced scraper execution failed", str(e))
         sys.exit(1)
 
 
 def run_transform(args: argparse.Namespace) -> None:
     """Run the data transformation utility"""
+    logger = ScraperLogger("CLI.Transform")
+    
     try:
         # Import from the utils module
         from aliexpress_scraper.utils.transform_to_listing import main as transform_main
@@ -588,16 +599,20 @@ def run_transform(args: argparse.Namespace) -> None:
         if args.tags:
             sys.argv.extend(["--tags"] + args.tags)
 
+        logger.start("Data transformation", f"input: {args.input_file}")
+        
         # Run the main function
         transform_main()
 
     except Exception as e:
-        print(f"❌ Error running transform utility: {e}")
+        logger.error("Data transformation failed", str(e))
         sys.exit(1)
 
 
 def run_store_retry(args: argparse.Namespace) -> None:
     """Run the standalone store retry utility"""
+    logger = ScraperLogger("CLI.StoreRetry")
+    
     try:
         # Import from the utils module
         from aliexpress_scraper.utils.standalone_store_retry import main as retry_main
@@ -614,25 +629,29 @@ def run_store_retry(args: argparse.Namespace) -> None:
         if args.dry_run:
             sys.argv.append("--dry-run")
 
+        logger.start("Store retry processing", f"input: {args.input_file}")
+        
         # Run the async main function
         retry_main()
 
     except Exception as e:
-        print(f"❌ Error running store retry utility: {e}")
+        logger.error("Store retry processing failed", str(e))
         sys.exit(1)
 
 
 def read_queries_from_file(file_path: str) -> list[str]:
     """Read search queries from a text file, one per line"""
+    logger = ScraperLogger("CLI.QueryReader")
+    
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             queries = [line.strip() for line in f if line.strip()]
         return queries
     except FileNotFoundError:
-        print(f"❌ Error: Queries file not found: {file_path}")
+        logger.error("Queries file not found", file_path)
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Error reading queries file: {e}")
+        logger.error("Error reading queries file", str(e))
         sys.exit(1)
 
 
@@ -652,9 +671,10 @@ def run_single_scraper(
 ) -> tuple[str, str, bool]:
     """Run a single scraper instance for one query"""
     query, scraper_args, scraper_type = args
+    logger = ScraperLogger("CLI.MultiScraper")
 
     try:
-        print(f"🔄 Starting scraper for query: '{query}'")
+        logger.process("Scraper starting", f"query: '{query}'")
 
         # Keep track of existing files before running scraper
         results_dir: str = "results"
@@ -702,15 +722,9 @@ def run_single_scraper(
         elif scraper_type == "enhanced":
             # Enhanced scraper in multi-query mode is currently not supported due to complexity
             # of running async browser automation in parallel processes
-            print(
-                f"⚠️  Enhanced scraper not supported in multi-query mode for query: '{query}'"
-            )
-            print(
-                f"💡 Recommendation: Use --scraper-type basic for multi-query operations"
-            )
-            print(
-                f'   Or run enhanced scraper individually: python main.py scrape enhanced --keyword "{query}" --brand "{scraper_args.brand}"'
-            )
+            logger.warning("Enhanced scraper not supported in multi-query mode", f"query: '{query}'")
+            logger.info("Recommendation: Use --scraper-type basic for multi-query operations")
+            logger.info(f'Or run enhanced scraper individually: python main.py scrape enhanced --keyword "{query}" --brand "{scraper_args.brand}"')
             return query, "", False
 
         # Find the newly created JSON and CSV files
@@ -762,23 +776,21 @@ def run_single_scraper(
                 try:
                     os.rename(old_csv_path, new_csv_path)
                 except Exception as e:
-                    print(
-                        f"⚠️  Warning: Could not rename CSV file '{new_csv_file}' to '{new_csv_filename}': {e}"
-                    )
+                    logger.warning("Could not rename CSV file", f"'{new_csv_file}' to '{new_csv_filename}': {e}")
             else:
-                print("⚠️  Warning: No CSV output file found to match the renamed JSON")
+                logger.warning("No CSV output file found to match the renamed JSON")
 
-            print(f"✅ Completed scraping for query: '{query}' -> {new_json_filename}")
+            logger.success("Scraping completed", f"query: '{query}' -> {new_json_filename}")
             return query, new_json_filename, True
         else:
-            print(f"⚠️  Warning: No JSON output file found for query: '{query}'")
+            logger.warning("No JSON output file found", f"query: '{query}'")
             return query, "", False
 
     except subprocess.TimeoutExpired:
-        print(f"⏱️  Timeout: Scraper for query '{query}' exceeded 15 minutes")
+        logger.error("Scraper timeout", f"query '{query}' exceeded 15 minutes")
         return query, "", False
     except Exception as e:
-        print(f"❌ Error scraping query '{query}': {e}")
+        logger.error("Scraper error", f"query '{query}': {e}")
         return query, "", False
 
 
@@ -786,6 +798,8 @@ def merge_json_results_to_csv(
     json_files: list[str], output_prefix: str = "aliexpress"
 ) -> str:
     """Merge multiple JSON result files into a single CSV and emit a merged JSON as well."""
+    logger = ScraperLogger("CLI.Merge")
+    
     try:
         # Output filenames without timestamps for stability
         csv_filename = f"{output_prefix}_merged.csv"
@@ -806,12 +820,12 @@ def merge_json_results_to_csv(
                         elif isinstance(data_obj, dict):
                             all_data.append(cast(dict[str, Any], data_obj))
                 except Exception as e:
-                    print(f"⚠️  Warning: Could not read {json_file}: {e}")
+                    logger.warning("Could not read JSON file", f"{json_file}: {e}")
             else:
-                print(f"⚠️  Warning: File not found: {json_file}")
+                logger.warning("File not found", json_file)
 
         if not all_data:
-            print("❌ No data found in any JSON files")
+            logger.error("No data found in any JSON files")
             return ""
 
         # Get all unique keys for CSV headers
@@ -835,33 +849,35 @@ def merge_json_results_to_csv(
             for item in all_data:
                 writer.writerow(item)
 
-        print(f"📄 Merged results saved to: {csv_path}")
-        print(f"💾 Merged JSON saved to: {json_path}")
-        print(f"📊 Total records: {len(all_data)}")
+        logger.success("Merged results saved", csv_path)
+        logger.info("Merged JSON saved", json_path)
+        logger.info("Total records", str(len(all_data)))
         return csv_path
 
     except Exception as e:
-        print(f"❌ Error merging results: {e}")
+        logger.error("Error merging results", str(e))
         return ""
 
 
 def run_multi_scraper(args: argparse.Namespace) -> None:
     """Run parallel scraping for multiple queries"""
+    logger = ScraperLogger("CLI.Multi")
+    
     try:
-        print(f"🚀 Starting parallel scraping from: {args.queries_dir}")
+        logger.start("Starting parallel scraping", f"queries from: {args.queries_dir}")
 
         # Read queries from file
         queries: list[str] = read_queries_from_file(args.queries_dir)
         if not queries:
-            print("❌ No queries found in file")
+            logger.error("No queries found in file")
             sys.exit(1)
 
-        print(f"📋 Found {len(queries)} queries to process")
-        print(f"🔧 Scraper type: {args.scraper_type}")
+        logger.info("Queries found", f"{len(queries)} to process")
+        logger.info("Scraper type", args.scraper_type)
 
         # Determine number of workers
         max_workers: int = args.max_workers if args.max_workers else mp.cpu_count()
-        print(f"⚙️  Using {max_workers} parallel workers")
+        logger.config("Parallel workers", str(max_workers))
 
         # Prepare arguments for each scraper
         # Cast args to MultiScraperArgset for typing purposes
@@ -896,7 +912,7 @@ def run_multi_scraper(args: argparse.Namespace) -> None:
                     if success and output_file:
                         json_files.append(os.path.join("results", output_file))
                 except Exception as e:
-                    print(f"❌ Exception for query '{query}': {e}")
+                    logger.error("Exception for query", f"'{query}': {e}")
                     results.append((query, False))
 
         end_time = time.time()
@@ -905,24 +921,25 @@ def run_multi_scraper(args: argparse.Namespace) -> None:
         successful: int = sum(1 for _, success in results if success)
         failed: int = len(results) - successful
 
-        print(f"\n📈 Scraping Summary:")
-        print(f"   ✅ Successful: {successful}")
-        print(f"   ❌ Failed: {failed}")
-        print(f"   ⏱️  Total time: {end_time - start_time:.2f} seconds")
+        logger.summary([
+            ("✅ Successful", successful),
+            ("❌ Failed", failed),
+            ("⏱️ Total time", f"{end_time - start_time:.2f}s")
+        ])
 
         # Merge results into CSV if we have successful results
         if json_files:
-            print(f"\n🔄 Merging {len(json_files)} result files...")
+            logger.process("Merging results", f"{len(json_files)} result files")
             csv_file = merge_json_results_to_csv(json_files, args.output_prefix)
             if csv_file:
-                print(f"🎉 Final merged results: {csv_file}")
+                logger.success("Final merged results", csv_file)
             else:
-                print("❌ Failed to create merged CSV file")
+                logger.error("Failed to create merged CSV file")
         else:
-            print("⚠️  No successful results to merge")
+            logger.warning("No successful results to merge")
 
     except Exception as e:
-        print(f"❌ Error in multi-scraper: {e}")
+        logger.error("Error in multi-scraper", str(e))
         sys.exit(1)
 
 
@@ -989,7 +1006,9 @@ Examples:
 
 
 def main() -> None:
-    """Main CLI entry point"""
+    """Main entry point for the CLI application"""
+    logger = ScraperLogger("CLI.Main")
+    
     parser = create_parser()
     args = parser.parse_args()
 
@@ -999,17 +1018,17 @@ def main() -> None:
         sys.exit(1)
 
     # Print header
-    print("🚀 AliExpress Scraper CLI")
+    logger.start("AliExpress Scraper CLI")
     print("=" * 50)
 
     # Execute the selected function
     try:
         args.func(args)
     except KeyboardInterrupt:
-        print("\n⚠️ Operation interrupted by user")
+        logger.warning("Operation interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        logger.error("Unexpected error", str(e))
         sys.exit(1)
 
 

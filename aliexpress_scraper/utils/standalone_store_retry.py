@@ -17,6 +17,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from .logger import ScraperLogger
+
 # Optional imports for store scraper modules - use try/except to handle missing modules
 try:
     from ..store import mcp_store_scraper  # type: ignore  # noqa: F401
@@ -29,15 +31,21 @@ except ImportError:
     pass  # traditional_store_scraper not available
 
 
-def load_products_from_json(json_file: str) -> list[dict[str, Any]]:
+def load_products_from_json(json_file: str, logger: ScraperLogger | None = None) -> list[dict[str, Any]]:
     """Load products from JSON file"""
     try:
         with open(json_file, "r", encoding="utf-8") as f:
             products = json.load(f)
-        print(f"✅ Loaded {len(products)} products from {json_file}")
+        if logger:
+            logger.success("Products loaded", f"{len(products)} from {json_file}")
+        else:
+            print(f"✅ Loaded {len(products)} products from {json_file}")
         return products
     except Exception as e:
-        print(f"❌ Error loading JSON file: {e}")
+        if logger:
+            logger.error("Error loading JSON file", str(e))
+        else:
+            print(f"❌ Error loading JSON file: {e}")
         sys.exit(1)
 
 
@@ -86,15 +94,26 @@ def analyze_missing_store_info(products: list[dict[str, Any]]) -> dict[str, int]
     return stats
 
 
-def print_analysis(stats: dict[str, int]) -> None:
+def print_analysis(stats: dict[str, int], logger: ScraperLogger | None = None) -> None:
     """Print analysis of missing store information"""
-    print("\n📊 Store Information Analysis:")
-    print(f"   Total products: {stats['total_products']}")
-    print(f"   Missing store name: {stats['missing_store_name']}")
-    print(f"   Missing store ID: {stats['missing_store_id']}")
-    print(f"   Missing store URL: {stats['missing_store_url']}")
-    print(f"   Missing any store info: {stats['missing_any_store_info']}")
-    print(f"   Missing all store info: {stats['missing_all_store_info']}")
+    if logger:
+        logger.summary([
+            ("Total products", stats['total_products']),
+            ("Missing store name", stats['missing_store_name']),
+            ("Missing store ID", stats['missing_store_id']),
+            ("Missing store URL", stats['missing_store_url']),
+            ("Missing any store info", stats['missing_any_store_info']),
+            ("Missing all store info", stats['missing_all_store_info'])
+        ])
+    else:
+        # Fallback for backward compatibility
+        print("\n📊 Store Information Analysis:")
+        print(f"   Total products: {stats['total_products']}")
+        print(f"   Missing store name: {stats['missing_store_name']}")
+        print(f"   Missing store ID: {stats['missing_store_id']}")
+        print(f"   Missing store URL: {stats['missing_store_url']}")
+        print(f"   Missing any store info: {stats['missing_any_store_info']}")
+        print(f"   Missing all store info: {stats['missing_all_store_info']}")
 
 
 def test_full_store_scraping_process(
@@ -720,11 +739,12 @@ Examples:
     )
 
     args = parser.parse_args()
+    logger = ScraperLogger("Utils.StoreRetry")
 
     # Input validation
     input_path = Path(args.input_file)
     if not input_path.exists():
-        print(f"❌ Input file not found: {args.input_file}")
+        logger.error("Input file not found", args.input_file)
         sys.exit(1)
 
     # Determine output file
@@ -735,25 +755,25 @@ Examples:
         suffix = input_path.suffix
         output_file = f"{stem}_with_stores{suffix}"
 
-    print(f"🔄 Standalone Store Retry Script")
-    print(f"   Input: {args.input_file}")
-    print(f"   Output: {output_file}")
+    logger.start("Standalone Store Retry Script")
+    logger.config("Input", args.input_file)
+    logger.config("Output", output_file)
 
     # Load products
-    products = load_products_from_json(args.input_file)
+    products = load_products_from_json(args.input_file, logger)
 
     # Analyze current state
     stats = analyze_missing_store_info(products)
-    print_analysis(stats)
+    print_analysis(stats, logger)
 
     # Dry run mode
     if args.dry_run:
-        print("\n🔍 Dry run mode - no changes will be made")
+        logger.info("Dry run mode - no changes will be made")
         return
 
     # Debug mode
     if args.debug:
-        print(f"\n🐛 Debug mode enabled")
+        logger.info("Debug mode enabled")
 
         # Get a sample URL for testing
         sample_url = None
@@ -764,7 +784,7 @@ Examples:
                 break
 
         if not sample_url:
-            print("❌ No product URLs found for debugging")
+            logger.error("No product URLs found for debugging")
             sys.exit(1)
 
         print(f"   Sample URL: {sample_url}")

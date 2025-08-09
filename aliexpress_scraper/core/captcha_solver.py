@@ -12,6 +12,8 @@ from typing import Any
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
+from ..utils.logger import ScraperLogger
+
 
 class AliExpressCaptchaSolver:
     """Specialized captcha solver for AliExpress"""
@@ -32,6 +34,7 @@ class AliExpressCaptchaSolver:
         self.context: BrowserContext | None = None
         self.page: Page | None = None
         self.playwright = None
+        self.logger = ScraperLogger("Core.CaptchaSolver")
 
     async def start_browser(self) -> None:
         """Start the browser with optimized configuration"""
@@ -129,7 +132,7 @@ class AliExpressCaptchaSolver:
             return False, {}
 
         try:
-            print(f"🔍 Navigating to: {url}")
+            self.logger.info("Navigating to URL", url)
             await self.page.goto(url, wait_until="domcontentloaded")
             await self.human_like_delay(3, 6)
 
@@ -142,35 +145,31 @@ class AliExpressCaptchaSolver:
             while captcha_attempts < max_attempts:
                 # Check if we're on a valid page (products visible)
                 if await self._is_on_products_page():
-                    print("✅ Products page detected - no captcha needed!")
+                    self.logger.success("Products page detected - no captcha needed!")
                     break
 
                 # Check for captcha
                 if await self._is_captcha_present():
-                    print(
-                        f"🛡️ Captcha detected (attempt {captcha_attempts + 1}/{max_attempts})"
-                    )
+                    self.logger.warning("Captcha detected", f"attempt {captcha_attempts + 1}/{max_attempts}")
 
                     success = await self._solve_slide_captcha()
                     captcha_attempts += 1
 
                     if success:
-                        print(f"✅ Captcha solved successfully!")
+                        self.logger.success("Captcha solved successfully!")
                         await asyncio.sleep(3)
 
                         if await self._is_on_products_page():
-                            print("✅ Products now visible!")
+                            self.logger.success("Products now visible!")
                             break
                         else:
-                            print("🔄 Products not yet visible, retrying...")
+                            self.logger.info("Products not yet visible, retrying...")
                             await asyncio.sleep(2)
                     else:
-                        print(
-                            f"⚠️ Captcha solving failed (attempt {captcha_attempts}/{max_attempts})"
-                        )
+                        self.logger.warning("Captcha solving failed", f"attempt {captcha_attempts}/{max_attempts}")
                         await asyncio.sleep(2)
                 else:
-                    print("⏳ Waiting for page to load...")
+                    self.logger.info("Waiting for page to load...")
                     await asyncio.sleep(2)
 
             # Extract session data
@@ -183,7 +182,7 @@ class AliExpressCaptchaSolver:
             return success, session_data
 
         except Exception as e:
-            print(f"❌ Error during captcha solving: {str(e)}")
+            self.logger.error("Error during captcha solving", str(e))
             return False, {}
 
     async def _handle_cookie_consent(self) -> None:
@@ -199,7 +198,7 @@ class AliExpressCaptchaSolver:
             )
             if cookie_button:
                 await cookie_button.click()
-                print("🍪 Cookie consent accepted")
+                self.logger.info("Cookie consent accepted")
                 await asyncio.sleep(1)
         except:
             # No cookie banner found, continue
@@ -255,7 +254,7 @@ class AliExpressCaptchaSolver:
                 }
             """)
         except Exception as e:
-            print(f"⚠️ Error checking for captcha: {str(e)}")
+            self.logger.warning("Error checking for captcha", str(e))
             return False
 
     async def _is_on_products_page(self) -> bool:
@@ -290,7 +289,7 @@ class AliExpressCaptchaSolver:
                 }
             """)
         except Exception as e:
-            print(f"⚠️ Error checking products page: {str(e)}")
+            self.logger.warning("Error checking products page", str(e))
             return False
 
     async def _solve_slide_captcha(self) -> bool:
@@ -432,7 +431,7 @@ class AliExpressCaptchaSolver:
                 return await self._solve_captcha_alternative()
 
         except Exception as e:
-            print(f"⚠️ Error solving slide captcha: {str(e)}")
+            self.logger.warning("Error solving slide captcha", str(e))
             return False
 
     async def _solve_captcha_alternative(self) -> bool:

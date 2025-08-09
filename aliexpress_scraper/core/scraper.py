@@ -14,6 +14,8 @@ import requests
 from dotenv import load_dotenv
 from playwright.sync_api import Route, sync_playwright
 
+from ..utils.logger import ScraperLogger
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -1528,6 +1530,8 @@ async def auto_retry_store_info(
 
 def main():
     """Main CLI entry point."""
+    logger = ScraperLogger("Core.Scraper")
+    
     parser = create_parser()
     args = parser.parse_args()
 
@@ -1536,23 +1540,23 @@ def main():
         if args.min_price > args.max_price:
             parser.error("--min-price cannot be greater than --max-price")
 
-    print(f"🔍 Starting AliExpress scraper for: '{args.keyword}'")
-    print(f"📦 Brand: {args.brand}")
-    print(f"📄 Pages to scrape: {args.pages}")
+    logger.start("AliExpress scraper starting", f"keyword: '{args.keyword}'")
+    logger.config("Brand", args.brand)
+    logger.config("Pages to scrape", str(args.pages))
 
     if args.proxy_provider:
-        print(f"🌐 Proxy provider: {args.proxy_provider}")
+        logger.config("Proxy provider", args.proxy_provider)
     else:
-        print("🌐 Proxy provider: None (direct connection)")
+        logger.config("Proxy provider", "None (direct connection)")
 
     if args.discount:
-        print("💰 Big Sale discount filter: ON")
+        logger.config("Big Sale discount filter", "ON")
     if args.free_shipping:
-        print("🚚 Free shipping filter: ON")
+        logger.config("Free shipping filter", "ON")
     if args.min_price is not None:
-        print(f"💵 Min price: ${args.min_price}")
+        logger.config("Min price", f"${args.min_price}")
     if args.max_price is not None:
-        print(f"💵 Max price: ${args.max_price}")
+        logger.config("Max price", f"${args.max_price}")
 
     print("=" * 50)
 
@@ -1675,7 +1679,7 @@ def main():
                 for field in ["Store Name", "Store ID", "Store URL"]
             )
             if store_fields_requested:
-                print("🏪 Store information requested - fetching store details...")
+                logger.info("Store information requested - fetching store details")
             # Extract product details
             extracted_products = extract_product_details(
                 raw_products,
@@ -1695,7 +1699,7 @@ def main():
         if args.enable_store_retry:
             import asyncio
 
-            print(f"\n🔄 Auto-retry enabled: Checking for missing store information...")
+            logger.process("Auto-retry enabled - checking for missing store information")
 
             try:
                 # Run the store retry process if json_file is available
@@ -1710,23 +1714,23 @@ def main():
                         )
                     )
             except Exception as e:
-                print(f"⚠️ Auto-retry failed: {e}")
+                logger.warning("Auto-retry failed", str(e))
 
-        print("\n✅ Scraping completed successfully!")
+        logger.success("Scraping completed successfully!")
         total_count = len(extracted_products)
         if args.stream and total_count == 0:
-            print("📊 Total products extracted: (streaming mode)")
+            logger.info("Total products extracted: (streaming mode)")
         else:
-            print(f"📊 Total products extracted: {total_count}")
+            logger.info("Total products extracted", str(total_count))
         if json_file:
-            print(f"💾 JSON file: {json_file}")
+            logger.info("JSON file", json_file)
         if csv_file:
-            print(f"📋 CSV file: {csv_file}")
+            logger.info("CSV file", csv_file)
 
     except KeyboardInterrupt:
-        print("\n⚠️ Scraping interrupted by user")
+        logger.warning("Scraping interrupted by user")
     except Exception as e:
-        print(f"\n❌ Error during scraping: {e}")
+        logger.error("Error during scraping", str(e))
         raise
 
 
