@@ -150,7 +150,10 @@ class AliExpressCaptchaSolver:
 
                 # Check for captcha
                 if await self._is_captcha_present():
-                    self.logger.warning("Captcha detected", f"attempt {captcha_attempts + 1}/{max_attempts}")
+                    self.logger.warning(
+                        "Captcha detected",
+                        f"attempt {captcha_attempts + 1}/{max_attempts}",
+                    )
 
                     success = await self._solve_slide_captcha()
                     captcha_attempts += 1
@@ -166,7 +169,10 @@ class AliExpressCaptchaSolver:
                             self.logger.info("Products not yet visible, retrying...")
                             await asyncio.sleep(2)
                     else:
-                        self.logger.warning("Captcha solving failed", f"attempt {captcha_attempts}/{max_attempts}")
+                        self.logger.warning(
+                            "Captcha solving failed",
+                            f"attempt {captcha_attempts}/{max_attempts}",
+                        )
                         await asyncio.sleep(2)
                 else:
                     self.logger.info("Waiting for page to load...")

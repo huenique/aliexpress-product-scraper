@@ -1531,7 +1531,7 @@ async def auto_retry_store_info(
 def main():
     """Main CLI entry point."""
     logger = ScraperLogger("Core.Scraper")
-    
+
     parser = create_parser()
     args = parser.parse_args()
 
@@ -1699,7 +1699,9 @@ def main():
         if args.enable_store_retry:
             import asyncio
 
-            logger.process("Auto-retry enabled - checking for missing store information")
+            logger.process(
+                "Auto-retry enabled - checking for missing store information"
+            )
 
             try:
                 # Run the store retry process if json_file is available

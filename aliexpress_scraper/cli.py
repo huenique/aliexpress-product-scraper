@@ -453,7 +453,7 @@ def create_store_retry_parser(subparsers: Any) -> None:
 def run_basic_scraper(args: argparse.Namespace) -> None:
     """Run the basic scraper with provided arguments"""
     logger = ScraperLogger("CLI.Basic")
-    
+
     try:
         # Import from the core module
         from aliexpress_scraper.core.scraper import main as scraper_main
@@ -483,8 +483,11 @@ def run_basic_scraper(args: argparse.Namespace) -> None:
         sys.argv.extend(["--store-retry-batch-size", str(args.store_retry_batch_size)])
         sys.argv.extend(["--store-retry-delay", str(args.store_retry_delay)])
 
-        logger.start("Basic scraper execution", f"keyword: '{args.keyword}', brand: '{args.brand}'")
-        
+        logger.start(
+            "Basic scraper execution",
+            f"keyword: '{args.keyword}', brand: '{args.brand}'",
+        )
+
         # Run the main function
         scraper_main()
 
@@ -496,7 +499,7 @@ def run_basic_scraper(args: argparse.Namespace) -> None:
 def run_enhanced_scraper(args: argparse.Namespace) -> None:
     """Run the enhanced scraper with provided arguments"""
     logger = ScraperLogger("CLI.Enhanced")
-    
+
     try:
         # Validate max_pages limit
         if args.max_pages > 1000:
@@ -516,7 +519,9 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
         if args.queries_file:
             queries = read_queries_from_file(args.queries_file)
             if not queries:
-                logger.error("Query processing failed", "No valid queries found in file")
+                logger.error(
+                    "Query processing failed", "No valid queries found in file"
+                )
                 sys.exit(1)
         else:
             queries = [args.keyword]
@@ -532,6 +537,8 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
             )
 
             all_results: list[dict[str, Any]] = []
+            all_products: list[dict[str, Any]] = []
+            created_files: list[str] = []
             total_products = 0
 
             for i, query in enumerate(queries, 1):
@@ -555,24 +562,125 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
                     logger.error(f"Query '{query}' failed", results["error"])
                 else:
                     products = results.get("products", [])
-                    total_products += len(products)
-                    logger.success(f"Query '{query}' completed", f"{len(products)} products")
+                    total_streamed = results.get("total_streamed", 0)
+                    product_count = len(products) if products else total_streamed
+                    total_products += product_count
+
+                    # Collect products for merged file (non-streaming mode)
+                    if products:
+                        all_products.extend(products)
+
+                    # Track created files for streaming merge
                     if results.get("json_file"):
+                        created_files.append(results["json_file"])
                         logger.save("JSON saved", results["json_file"])
                     if results.get("csv_file"):
                         logger.save("CSV saved", results["csv_file"])
 
+                    logger.success(
+                        f"Query '{query}' completed", f"{product_count} products"
+                    )
+
                 all_results.append(results)
+
+            # Create merged files if we have multiple queries
+            if len(queries) > 1:
+                logger.process(
+                    "Merge operation", "Creating consolidated files for all queries"
+                )
+
+                # Common fields for merged file
+                all_fields = [
+                    "Product ID",
+                    "Title",
+                    "Sale Price",
+                    "Original Price",
+                    "Discount (%)",
+                    "Currency",
+                    "Rating",
+                    "Orders Count",
+                    "Store Name",
+                    "Store ID",
+                    "Store URL",
+                    "Product URL",
+                    "Image URL",
+                    "Brand",
+                ]
+
+                if getattr(args, "stream", False) and created_files:
+                    # Streaming mode: merge from individual files
+                    merged_products: list[dict[str, Any]] = []
+
+                    for json_file in created_files:
+                        if os.path.exists(json_file):
+                            try:
+                                with open(json_file, "r", encoding="utf-8") as f:
+                                    file_data: Any = json.load(f)
+                                    if isinstance(file_data, list):
+                                        # Filter and type-cast valid product dictionaries
+                                        product_count = 0
+                                        item: Any
+                                        for item in file_data:  # type: ignore
+                                            if isinstance(item, dict):
+                                                merged_products.append(item)  # type: ignore[arg-type]
+                                                product_count += 1
+                                        logger.info(
+                                            f"✓ Merged {product_count} products from {os.path.basename(json_file)}"
+                                        )
+                                    else:
+                                        logger.info(
+                                            f"✓ Merged 0 products from {os.path.basename(json_file)}"
+                                        )
+                            except (json.JSONDecodeError, FileNotFoundError) as e:
+                                logger.warning(f"⚠️ Could not read {json_file}: {e}")
+
+                    if merged_products:
+                        from aliexpress_scraper.core.scraper import save_results
+
+                        merged_json_file, merged_csv_file = save_results(
+                            keyword="merged",
+                            data=merged_products,
+                            selected_fields=all_fields,
+                            brand=args.brand,
+                            log_callback=logger.info,
+                        )
+
+                        if merged_json_file:
+                            logger.save("Merged JSON saved", merged_json_file)
+                        if merged_csv_file:
+                            logger.save("Merged CSV saved", merged_csv_file)
+                        logger.info(
+                            f"📦 Total products in merged files: {len(merged_products)}"
+                        )
+
+                elif all_products:
+                    # Non-streaming mode: use collected products
+                    from aliexpress_scraper.core.scraper import save_results
+
+                    merged_json_file, merged_csv_file = save_results(
+                        keyword="merged",
+                        data=all_products,
+                        selected_fields=all_fields,
+                        brand=args.brand,
+                        log_callback=logger.info,
+                    )
+
+                    if merged_json_file:
+                        logger.save("Merged JSON saved", merged_json_file)
+                    if merged_csv_file:
+                        logger.save("Merged CSV saved", merged_csv_file)
 
             # Summary for multiple queries
             if len(queries) > 1:
                 successful_queries = sum(1 for r in all_results if "error" not in r)
-                logger.summary([
-                    ("Total queries", len(queries)),
-                    ("Successful", successful_queries),
-                    ("Failed", len(queries) - successful_queries),
-                    ("Total products", total_products),
-                ])
+                logger.summary(
+                    [
+                        ("Total queries", len(queries)),
+                        ("Successful", successful_queries),
+                        ("Failed", len(queries) - successful_queries),
+                        ("Total products", total_products),
+                    ]
+                )
 
         asyncio.run(_runner())
 
@@ -584,7 +692,7 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
 def run_transform(args: argparse.Namespace) -> None:
     """Run the data transformation utility"""
     logger = ScraperLogger("CLI.Transform")
-    
+
     try:
         # Import from the utils module
         from aliexpress_scraper.utils.transform_to_listing import main as transform_main
@@ -600,7 +708,7 @@ def run_transform(args: argparse.Namespace) -> None:
             sys.argv.extend(["--tags"] + args.tags)
 
         logger.start("Data transformation", f"input: {args.input_file}")
-        
+
         # Run the main function
         transform_main()
 
@@ -612,7 +720,7 @@ def run_transform(args: argparse.Namespace) -> None:
 def run_store_retry(args: argparse.Namespace) -> None:
     """Run the standalone store retry utility"""
     logger = ScraperLogger("CLI.StoreRetry")
-    
+
     try:
         # Import from the utils module
         from aliexpress_scraper.utils.standalone_store_retry import main as retry_main
@@ -630,7 +738,7 @@ def run_store_retry(args: argparse.Namespace) -> None:
             sys.argv.append("--dry-run")
 
         logger.start("Store retry processing", f"input: {args.input_file}")
-        
+
         # Run the async main function
         retry_main()
 
@@ -642,7 +750,7 @@ def run_store_retry(args: argparse.Namespace) -> None:
 def read_queries_from_file(file_path: str) -> list[str]:
     """Read search queries from a text file, one per line"""
     logger = ScraperLogger("CLI.QueryReader")
-    
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             queries = [line.strip() for line in f if line.strip()]
@@ -722,9 +830,16 @@ def run_single_scraper(
         elif scraper_type == "enhanced":
             # Enhanced scraper in multi-query mode is currently not supported due to complexity
             # of running async browser automation in parallel processes
-            logger.warning("Enhanced scraper not supported in multi-query mode", f"query: '{query}'")
-            logger.info("Recommendation: Use --scraper-type basic for multi-query operations")
-            logger.info(f'Or run enhanced scraper individually: python main.py scrape enhanced --keyword "{query}" --brand "{scraper_args.brand}"')
+            logger.warning(
+                "Enhanced scraper not supported in multi-query mode",
+                f"query: '{query}'",
+            )
+            logger.info(
+                "Recommendation: Use --scraper-type basic for multi-query operations"
+            )
+            logger.info(
+                f'Or run enhanced scraper individually: python main.py scrape enhanced --keyword "{query}" --brand "{scraper_args.brand}"'
+            )
             return query, "", False
 
         # Find the newly created JSON and CSV files
@@ -776,11 +891,16 @@ def run_single_scraper(
                 try:
                     os.rename(old_csv_path, new_csv_path)
                 except Exception as e:
-                    logger.warning("Could not rename CSV file", f"'{new_csv_file}' to '{new_csv_filename}': {e}")
+                    logger.warning(
+                        "Could not rename CSV file",
+                        f"'{new_csv_file}' to '{new_csv_filename}': {e}",
+                    )
             else:
                 logger.warning("No CSV output file found to match the renamed JSON")
 
-            logger.success("Scraping completed", f"query: '{query}' -> {new_json_filename}")
+            logger.success(
+                "Scraping completed", f"query: '{query}' -> {new_json_filename}"
+            )
             return query, new_json_filename, True
         else:
             logger.warning("No JSON output file found", f"query: '{query}'")
@@ -799,7 +919,7 @@ def merge_json_results_to_csv(
 ) -> str:
     """Merge multiple JSON result files into a single CSV and emit a merged JSON as well."""
     logger = ScraperLogger("CLI.Merge")
-    
+
     try:
         # Output filenames without timestamps for stability
         csv_filename = f"{output_prefix}_merged.csv"
@@ -862,7 +982,7 @@ def merge_json_results_to_csv(
 def run_multi_scraper(args: argparse.Namespace) -> None:
     """Run parallel scraping for multiple queries"""
     logger = ScraperLogger("CLI.Multi")
-    
+
     try:
         logger.start("Starting parallel scraping", f"queries from: {args.queries_dir}")
 
@@ -921,11 +1041,13 @@ def run_multi_scraper(args: argparse.Namespace) -> None:
         successful: int = sum(1 for _, success in results if success)
         failed: int = len(results) - successful
 
-        logger.summary([
-            ("✅ Successful", successful),
-            ("❌ Failed", failed),
-            ("⏱️ Total time", f"{end_time - start_time:.2f}s")
-        ])
+        logger.summary(
+            [
+                ("✅ Successful", successful),
+                ("❌ Failed", failed),
+                ("⏱️ Total time", f"{end_time - start_time:.2f}s"),
+            ]
+        )
 
         # Merge results into CSV if we have successful results
         if json_files:
@@ -1008,7 +1130,7 @@ Examples:
 def main() -> None:
     """Main entry point for the CLI application"""
     logger = ScraperLogger("CLI.Main")
-    
+
     parser = create_parser()
     args = parser.parse_args()
 

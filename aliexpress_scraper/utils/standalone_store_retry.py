@@ -31,7 +31,9 @@ except ImportError:
     pass  # traditional_store_scraper not available
 
 
-def load_products_from_json(json_file: str, logger: ScraperLogger | None = None) -> list[dict[str, Any]]:
+def load_products_from_json(
+    json_file: str, logger: ScraperLogger | None = None
+) -> list[dict[str, Any]]:
     """Load products from JSON file"""
     try:
         with open(json_file, "r", encoding="utf-8") as f:
@@ -97,14 +99,16 @@ def analyze_missing_store_info(products: list[dict[str, Any]]) -> dict[str, int]
 def print_analysis(stats: dict[str, int], logger: ScraperLogger | None = None) -> None:
     """Print analysis of missing store information"""
     if logger:
-        logger.summary([
-            ("Total products", stats['total_products']),
-            ("Missing store name", stats['missing_store_name']),
-            ("Missing store ID", stats['missing_store_id']),
-            ("Missing store URL", stats['missing_store_url']),
-            ("Missing any store info", stats['missing_any_store_info']),
-            ("Missing all store info", stats['missing_all_store_info'])
-        ])
+        logger.summary(
+            [
+                ("Total products", stats["total_products"]),
+                ("Missing store name", stats["missing_store_name"]),
+                ("Missing store ID", stats["missing_store_id"]),
+                ("Missing store URL", stats["missing_store_url"]),
+                ("Missing any store info", stats["missing_any_store_info"]),
+                ("Missing all store info", stats["missing_all_store_info"]),
+            ]
+        )
     else:
         # Fallback for backward compatibility
         print("\n📊 Store Information Analysis:")
