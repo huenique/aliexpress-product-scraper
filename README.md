@@ -45,6 +45,7 @@ A powerful command-line tool for scraping product data from AliExpress using the
    - Handles currency formatting
    - Processes URLs and image links
    - Manages pagination automatically
+   - **Store Information**: Seller/store fields are set to null by default for faster processing (focuses on product listing data only)
 
 ## Project Structure
 
@@ -655,9 +656,9 @@ The scraper can extract the following product information:
 - Currency
 - Rating
 - Orders Count
-- Store Name (requires proxy)
-- Store ID (requires proxy)
-- Store URL (requires proxy)
+- Store Name (**set to null** - store extraction disabled for faster processing)
+- Store ID (**set to null** - store extraction disabled for faster processing)
+- Store URL (**set to null** - store extraction disabled for faster processing)
 - Product URL
 - Image URL
 - Brand (user-specified)
@@ -665,37 +666,36 @@ The scraper can extract the following product information:
 ## Best Practices
 
 1. **Choosing the Right Scraper**:
-   - Use `scraper.py` for basic, fast scraping
-   - Use `enhanced_scraper.py` for maximum store data completeness
-   - Enable `--enable-store-retry` when store information is critical
+   - Use `scraper.py` for basic, fast scraping focused on product information
+   - Use `enhanced_scraper.py` for advanced features and error handling
+   - Both scrapers now focus on listing data only (store fields set to null)
 
-2. **Store Information Extraction**:
-   - Always use proxy provider for best store data results
-   - Configure appropriate retry batch sizes (5-10) for balance of speed and reliability
-   - Set retry delays (1-2 seconds) to avoid overwhelming servers
+2. **Performance Optimization**:
+   - Store information extraction is disabled for faster processing
+   - Scraper focuses on product listing data only
+   - No individual product page visits required for store information
 
 3. **Request Delay**:
-4. **Request Delay**:
    - Default: 1 second between requests
    - Lower values (0.2-0.5s) may work but risk temporary IP blocks
    - Adjust based on your needs and risk tolerance
 
-5. **Page Count**:
+4. **Page Count**:
    - Maximum: 60 pages per search
    - Recommended: Start with fewer pages to test
    - Use filters to get more relevant results
 
-6. **Proxy Usage**:
-   - Optional but recommended for store information extraction
+5. **Proxy Usage**:
+   - Optional for basic listing scraping
    - Required credentials in `.env` file when using `--proxy-provider`
    - Helps avoid rate limiting and IP blocks
 
-7. **Session Management**:
+6. **Session Management**:
    - Session data is cached for 30 minutes
    - Clear browser cookies if you encounter issues
    - Let the automated browser handle cookie collection
 
-8. **Field Selection**:
+7. **Field Selection**:
    - Use `--fields` to extract only needed data for faster processing
    - Omit `--fields` to get all available fields
    - Store fields require proxy provider to be populated

@@ -9,10 +9,10 @@ intelligent retry logic, and comprehensive logging.
 Features:
 - Automatic captcha detection and solving
 - Session caching with expiration management
-- Enhanced store information extraction with retry
 - Streaming mode for memory-efficient processing
 - Comprehensive logging with progress tracking
 - Proxy support for improved reliability
+- Store information set to null by default for faster processing
 """
 
 import argparse
@@ -73,9 +73,9 @@ class EnhancedAliExpressScraper:
             proxy_provider: Proxy provider ("oxylabs", "massive", or "" for none)
             enable_captcha_solver: Whether to enable automatic captcha solving
             captcha_solver_headless: Whether to run captcha solver in headless mode
-            enable_store_retry: Whether to automatically retry missing store information
-            store_retry_batch_size: Batch size for store retry operations
-            store_retry_delay: Delay between store retry batches
+            enable_store_retry: Legacy parameter - store extraction is disabled
+            store_retry_batch_size: Legacy parameter - store extraction is disabled
+            store_retry_delay: Legacy parameter - store extraction is disabled
             log_callback: Logging function
         """
         self.proxy_provider = proxy_provider
@@ -131,8 +131,14 @@ class EnhancedAliExpressScraper:
             self.log_callback(
                 "⚠️  Captcha solver disabled - using standard session initialization"
             )
-            return initialize_session_data(
-                keyword, self.proxy_provider, self.log_callback
+            # Run the sync function in executor to avoid asyncio loop conflict
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                initialize_session_data,
+                keyword,
+                self.proxy_provider,
+                self.log_callback,
             )
 
         # Use captcha solver for session initialization
@@ -169,15 +175,27 @@ class EnhancedAliExpressScraper:
                 self.log_callback(
                     "⚠️  Captcha solver failed - falling back to standard method"
                 )
-                return initialize_session_data(
-                    keyword, self.proxy_provider, self.log_callback
+                # Run the sync function in executor to avoid asyncio loop conflict
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(
+                    None,
+                    initialize_session_data,
+                    keyword,
+                    self.proxy_provider,
+                    self.log_callback,
                 )
 
         except Exception as e:
             self.log_callback(f"❌ Captcha solver initialization error: {str(e)}")
             self.log_callback("🔄 Falling back to standard session initialization")
-            return initialize_session_data(
-                keyword, self.proxy_provider, self.log_callback
+            # Run the sync function in executor to avoid asyncio loop conflict
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                initialize_session_data,
+                keyword,
+                self.proxy_provider,
+                self.log_callback,
             )
 
     def _check_cache(self) -> dict[str, Any] | None:
@@ -315,14 +333,14 @@ class EnhancedAliExpressScraper:
 
                 self.log_callback("🏗️  Extracting detailed product information...")
 
-                # Extract detailed product information with store data
+                # Extract detailed product information (store info disabled)
                 extracted_products = extract_product_details(
                     raw_products=raw_products,
                     selected_fields=all_fields,
                     brand=brand,  # Use the provided brand parameter
                     proxy_provider=self.proxy_provider,
                     session=session,
-                    fetch_store_info=True,  # Enable store info fetching
+                    fetch_store_info=False,  # Store info extraction disabled for faster processing
                     log_callback=self.log_callback,
                 )
 
@@ -609,8 +627,12 @@ class EnhancedAliExpressScraper:
                 self.log_callback(f"📄 Saved CSV: {os.path.basename(csv_file)}")
 
             if self.enable_store_retry and json_file:
-                self.log_callback("🏪 Starting automatic store information retry...")
-                await self._auto_retry_store_info(json_file, products)
+                self.log_callback(
+                    "🏪 Store retry is disabled - store extraction is not performed"
+                )
+                self.log_callback(
+                    "ℹ️  Store fields are set to null by default for faster processing"
+                )
 
         return results
 
@@ -968,19 +990,19 @@ if __name__ == "__main__":
         parser.add_argument(
             "--enable-store-retry",
             action="store_true",
-            help="Automatically retry missing store information after scraping",
+            help="Legacy parameter - store extraction is disabled for faster processing",
         )
         parser.add_argument(
             "--store-retry-batch-size",
             type=int,
             default=5,
-            help="Batch size for store retry operations (default: 5)",
+            help="Legacy parameter - store extraction is disabled",
         )
         parser.add_argument(
             "--store-retry-delay",
             type=float,
             default=2.0,
-            help="Delay between store retry batches in seconds (default: 2.0)",
+            help="Legacy parameter - store extraction is disabled",
         )
 
         args = parser.parse_args()
@@ -994,7 +1016,9 @@ if __name__ == "__main__":
         print(
             f"🛡️  Captcha solver: {'Enabled' if not args.disable_captcha_solver else 'Disabled'}"
         )
-        print(f"🏪 Store retry: {'Enabled' if args.enable_store_retry else 'Disabled'}")
+        print(
+            f"🏪 Store retry: Disabled (store extraction disabled for faster processing)"
+        )
         print("-" * 60)
 
         # Create scraper instance

@@ -335,6 +335,23 @@ def scrape_aliexpress_data(
         # Independent session per thread for safety
         local_session = requests.Session()
 
+        # Configure session for better SSL handling
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
+        # Configure retry strategy specifically for SSL issues
+        retry_strategy = Retry(
+            total=3,
+            status_forcelist=[429, 500, 502, 503, 504],
+            backoff_factor=1,
+            raise_on_status=False,  # Don't raise on status errors, let us handle them
+        )
+
+        # Mount adapter with retry strategy
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        local_session.mount("http://", adapter)
+        local_session.mount("https://", adapter)
+
         # Configure proxy for requests session based on provider
         if proxy_provider == "oxylabs":
             proxy_auth_l = f"{OXYLABS_USERNAME}:{OXYLABS_PASSWORD}"
@@ -378,65 +395,122 @@ def scrape_aliexpress_data(
             f"Attempting to fetch page {page_num} for product: '{keyword}' via API..."
         )
 
-        try:
-            response_l = local_session.post(
-                API_URL, json=payload, headers=request_headers, timeout=30
-            )
-            if response_l.status_code != 200:
-                log_callback(
-                    f"Failed to fetch page {page_num}. Status code: {response_l.status_code}"
-                )
-                log_callback(f"Response text sample: {response_l.text[:200]}")
-                return page_num, []
+        # SSL error retry logic - common SSL issues need multiple attempts
+        max_ssl_retries = 3
+        last_error = None
 
-            json_data: dict[str, Any] | None = response_l.json()
-            if not isinstance(json_data, dict):
-                log_callback(
-                    f"Unexpected response format for page {page_num}. Expected JSON dict."
-                )
-                log_callback(f"Response text sample: {response_l.text[:200]}")
-                return page_num, []
+        for ssl_attempt in range(max_ssl_retries):
+            try:
+                if ssl_attempt > 0:
+                    import time
 
-            if json_data.get("ret") and "FAIL_SYS_USER_VALIDATE" in json_data.get(
-                "ret", []
-            ):
-                log_callback(
-                    "🚫 AliExpress validation error detected - API access blocked"
-                )
-                log_callback(
-                    "💡 Recommendation: Use 'enhanced_scraper.py' which includes captcha solving capabilities"
-                )
-                log_callback(
-                    "   Example: uv run python enhanced_scraper.py 'mechanical keyboard' --max-pages 1"
-                )
-                return page_num, []
+                    delay = ssl_attempt * 2  # Progressive delay: 2s, 4s
+                    log_callback(
+                        f"Retrying page {page_num} (attempt {ssl_attempt + 1}/{max_ssl_retries}) after SSL error, waiting {delay}s..."
+                    )
+                    time.sleep(delay)
 
-            items_list = (
-                json_data.get("data", {})
-                .get("result", {})
-                .get("mods", {})
-                .get("itemList", {})
-                .get("content", [])
-            )
-
-            if not items_list:
-                log_callback(
-                    f"No items found using path 'data.result.mods.itemList.content' on page {page_num}."
+                response_l = local_session.post(
+                    API_URL,
+                    json=payload,
+                    headers=request_headers,
+                    timeout=30,
+                    verify=True,  # Ensure SSL verification
                 )
-                return page_num, []
-            else:
-                log_callback(f"Found {len(items_list)} items on page {page_num}.")
-                return page_num, items_list
 
-        except requests.exceptions.RequestException as e:
-            log_callback(f"Request failed for page {page_num}: {e}")
-            return page_num, []
-        except json.JSONDecodeError:
-            log_callback(f"Failed to decode JSON response for page {page_num}.")
-            return page_num, []
-        except Exception as e:
-            log_callback(f"An error occurred processing page {page_num}: {e}")
-            return page_num, []
+                if response_l.status_code != 200:
+                    log_callback(
+                        f"Failed to fetch page {page_num}. Status code: {response_l.status_code}"
+                    )
+                    log_callback(f"Response text sample: {response_l.text[:200]}")
+                    return page_num, []
+
+                json_data: dict[str, Any] | None = response_l.json()
+                if not isinstance(json_data, dict):
+                    log_callback(
+                        f"Unexpected response format for page {page_num}. Expected JSON dict."
+                    )
+                    log_callback(f"Response text sample: {response_l.text[:200]}")
+                    return page_num, []
+
+                if json_data.get("ret") and "FAIL_SYS_USER_VALIDATE" in json_data.get(
+                    "ret", []
+                ):
+                    log_callback(
+                        "🚫 AliExpress validation error detected - API access blocked"
+                    )
+                    log_callback(
+                        "💡 Recommendation: Use 'enhanced_scraper.py' which includes captcha solving capabilities"
+                    )
+                    log_callback(
+                        "   Example: uv run python enhanced_scraper.py 'mechanical keyboard' --max-pages 1"
+                    )
+                    return page_num, []
+
+                items_list = (
+                    json_data.get("data", {})
+                    .get("result", {})
+                    .get("mods", {})
+                    .get("itemList", {})
+                    .get("content", [])
+                )
+
+                if not items_list:
+                    log_callback(
+                        f"No items found using path 'data.result.mods.itemList.content' on page {page_num}."
+                    )
+                    return page_num, []
+                else:
+                    log_callback(f"Found {len(items_list)} items on page {page_num}.")
+                    return page_num, items_list
+
+            except requests.exceptions.SSLError as e:
+                last_error = e
+                log_callback(
+                    f"SSL connection error on page {page_num}, attempt {ssl_attempt + 1}/{max_ssl_retries}: {e}"
+                )
+                if ssl_attempt == max_ssl_retries - 1:
+                    log_callback(
+                        f"❌ SSL error persists after {max_ssl_retries} attempts for page {page_num}"
+                    )
+                    break
+                continue  # Retry SSL errors
+
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                log_callback(f"Request failed for page {page_num}: {e}")
+                break  # Don't retry other request errors
+
+            except OSError as e:
+                last_error = e
+                if "SSL" in str(e) or "EOF" in str(e) or "ssl" in str(e).lower():
+                    log_callback(
+                        f"SSL-related OS error on page {page_num}, attempt {ssl_attempt + 1}/{max_ssl_retries}: {e}"
+                    )
+                    if ssl_attempt == max_ssl_retries - 1:
+                        log_callback(
+                            f"❌ SSL-related error persists after {max_ssl_retries} attempts for page {page_num}"
+                        )
+                        break
+                    continue  # Retry SSL-related OS errors
+                else:
+                    log_callback(f"OS error for page {page_num}: {e}")
+                    break  # Don't retry other OS errors
+
+            except json.JSONDecodeError as e:
+                last_error = e
+                log_callback(f"Failed to decode JSON response for page {page_num}: {e}")
+                break  # Don't retry JSON errors
+
+            except Exception as e:
+                last_error = e
+                log_callback(f"An error occurred processing page {page_num}: {e}")
+                break  # Don't retry other errors
+
+        # If we get here, all retries failed
+        if last_error:
+            log_callback(f"Final error for page {page_num} after retries: {last_error}")
+        return page_num, []
 
     # Limit workers to a reasonable number
     max_workers = min(max_pages, 8)
@@ -1011,26 +1085,11 @@ def extract_product_details(
 
     log_callback(f"Extracting selected fields: {selected_fields}")
 
-    # Collect all product IDs that need store info
-    store_info_results: dict[str, dict[str, str | None]] = {}
-    if fetch_store_info and session:
-        store_fields_requested = any(
-            field in selected_fields
-            for field in ["Store Name", "Store ID", "Store URL"]
-        )
-        if store_fields_requested:
-            product_ids: list[str] = [
-                str(product.get("productId"))
-                for product in raw_products
-                if product.get("productId")
-            ]
-            if product_ids:
-                log_callback(
-                    f"Batch fetching store info for {len(product_ids)} products..."
-                )
-                store_info_results = fetch_store_info_batch(
-                    product_ids, session, proxy_provider, log_callback, max_workers=3
-                )
+    # Store info extraction is disabled - seller information set to null by default
+    # This focuses the scraper on product information from listings only
+    log_callback(
+        "Store information extraction disabled - focusing on product listings only"
+    )
 
     for product in raw_products:
         # --- Extract ALL possible fields first ---
@@ -1047,17 +1106,10 @@ def extract_product_details(
         currency = sale_price_info.get("currencyCode")
         discount = sale_price_info.get("discount")
 
-        # Get store info from batch results
+        # Store info is disabled - always set to null
         store_name = None
         store_id = None
         store_url = None
-
-        if product_id in store_info_results:
-            store_info = store_info_results[product_id]
-            if store_info:
-                store_name = store_info.get("store_name")
-                store_id = store_info.get("store_id")
-                store_url = store_info.get("store_url")
 
         trade_info = product.get("trade", {})
         orders_count = trade_info.get("realTradeCount")

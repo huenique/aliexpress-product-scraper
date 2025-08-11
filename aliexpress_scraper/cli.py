@@ -140,19 +140,19 @@ def create_basic_scraper_parser(subparsers: Any) -> None:
     parser.add_argument(
         "--enable-store-retry",
         action="store_true",
-        help="Automatically retry missing store information",
+        help="Legacy parameter - store extraction is disabled for faster processing",
     )
     parser.add_argument(
         "--store-retry-batch-size",
         type=int,
         default=5,
-        help="Batch size for store retry operations (default: 5)",
+        help="Legacy parameter - store extraction is disabled",
     )
     parser.add_argument(
         "--store-retry-delay",
         type=float,
         default=2.0,
-        help="Delay between store retry batches (default: 2.0)",
+        help="Legacy parameter - store extraction is disabled",
     )
 
     parser.set_defaults(func=run_basic_scraper)
@@ -215,19 +215,19 @@ def create_enhanced_scraper_parser(subparsers: Any) -> None:
     parser.add_argument(
         "--enable-store-retry",
         action="store_true",
-        help="Automatically retry missing store information after scraping",
+        help="Legacy parameter - store extraction is disabled for faster processing",
     )
     parser.add_argument(
         "--store-retry-batch-size",
         type=int,
         default=5,
-        help="Batch size for store retry operations (default: 5)",
+        help="Legacy parameter - store extraction is disabled",
     )
     parser.add_argument(
         "--store-retry-delay",
         type=float,
         default=2.0,
-        help="Delay between store retry batches in seconds (default: 2.0)",
+        help="Legacy parameter - store extraction is disabled",
     )
 
     # Streaming support for enhanced scraper
@@ -337,19 +337,19 @@ def create_multi_scraper_parser(subparsers: Any) -> None:
     parser.add_argument(
         "--enable-store-retry",
         action="store_true",
-        help="Automatically retry missing store information",
+        help="Legacy parameter - store extraction is disabled for faster processing",
     )
     parser.add_argument(
         "--store-retry-batch-size",
         type=int,
         default=5,
-        help="Batch size for store retry operations (default: 5)",
+        help="Legacy parameter - store extraction is disabled",
     )
     parser.add_argument(
         "--store-retry-delay",
         type=float,
         default=2.0,
-        help="Delay between store retry batches (default: 2.0)",
+        help="Legacy parameter - store extraction is disabled",
     )
 
     # Enhanced scraper specific options
