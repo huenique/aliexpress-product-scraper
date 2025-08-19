@@ -953,7 +953,10 @@ if __name__ == "__main__":
             "--brand", "-b", required=True, help="Brand name to associate with products"
         )
         parser.add_argument(
-            "--max-pages", type=int, default=1, help="Maximum pages to scrape"
+            "--max-pages",
+            type=int,
+            default=0,
+            help="Maximum pages to scrape (0 for all pages)",
         )
         parser.add_argument(
             "--proxy-provider",

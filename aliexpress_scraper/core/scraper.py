@@ -512,28 +512,95 @@ def scrape_aliexpress_data(
             log_callback(f"Final error for page {page_num} after retries: {last_error}")
         return page_num, []
 
-    # Limit workers to a reasonable number
-    max_workers = min(max_pages, 8)
-    page_results: dict[int, list[dict[str, Any]]] = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(fetch_page, p): p for p in range(1, max_pages + 1)}
-        for future in as_completed(futures):
-            page_num, items = future.result()
-            if on_page is not None:
-                # Stream page results immediately
-                try:
-                    on_page(page_num, items)
-                except Exception as e:
-                    log_callback(f"Streaming callback failed for page {page_num}: {e}")
+    # Handle unlimited pagination (max_pages=0) vs fixed pagination
+    if max_pages == 0:
+        # Unlimited pagination: continue until we hit an empty page
+        log_callback(
+            "🔄 Unlimited pagination mode: scraping until no more pages found..."
+        )
+        page_results: dict[int, list[dict[str, Any]]] = {}
+        current_page = 1
+        consecutive_empty_pages = 0
+        max_consecutive_empty = 3  # Stop after 3 consecutive empty pages
+        absolute_max_pages = 100  # Safety limit to prevent infinite loops
+
+        while (
+            current_page <= absolute_max_pages
+            and consecutive_empty_pages < max_consecutive_empty
+        ):
+            log_callback(f"📄 Fetching page {current_page}...")
+            page_num, items = fetch_page(current_page)
+
+            if items:
+                consecutive_empty_pages = 0  # Reset counter on successful page
+                if on_page is not None:
+                    # Stream page results immediately
+                    try:
+                        on_page(page_num, items)
+                    except Exception as e:
+                        log_callback(
+                            f"Streaming callback failed for page {page_num}: {e}"
+                        )
+                else:
+                    page_results[page_num] = items
             else:
-                page_results[page_num] = items
-            # Optional slight pacing
+                consecutive_empty_pages += 1
+                log_callback(
+                    f"📄 Page {current_page}: No items found (empty page {consecutive_empty_pages}/{max_consecutive_empty})"
+                )
+
+            # Optional pacing
             if delay and delay > 0:
                 time.sleep(min(delay, 0.5))
 
+            current_page += 1
+
+        if current_page > absolute_max_pages:
+            log_callback(f"⚠️ Reached safety limit of {absolute_max_pages} pages")
+        if consecutive_empty_pages >= max_consecutive_empty:
+            log_callback(
+                f"✅ Stopped after {consecutive_empty_pages} consecutive empty pages"
+            )
+
+        log_callback(
+            f"🔄 Completed unlimited pagination: scraped {current_page - 1} pages"
+        )
+
+    else:
+        # Fixed pagination: original logic
+        # Limit workers to a reasonable number
+        max_workers = min(max_pages, 8)
+        page_results: dict[int, list[dict[str, Any]]] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(fetch_page, p): p for p in range(1, max_pages + 1)
+            }
+            for future in as_completed(futures):
+                page_num, items = future.result()
+                if on_page is not None:
+                    # Stream page results immediately
+                    try:
+                        on_page(page_num, items)
+                    except Exception as e:
+                        log_callback(
+                            f"Streaming callback failed for page {page_num}: {e}"
+                        )
+                else:
+                    page_results[page_num] = items
+                # Optional slight pacing
+                if delay and delay > 0:
+                    time.sleep(min(delay, 0.5))
+
     # Aggregate results in page order for determinism (non-streaming mode)
     if on_page is None:
-        for p in range(1, max_pages + 1):
+        max_page_to_check = (
+            max_pages
+            if max_pages > 0
+            else max(page_results.keys())
+            if page_results
+            else 0
+        )
+        for p in range(1, max_page_to_check + 1):
             items = page_results.get(p, [])
             if items:
                 all_products_raw.extend(items)

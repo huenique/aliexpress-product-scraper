@@ -180,7 +180,10 @@ def create_enhanced_scraper_parser(subparsers: Any) -> None:
 
     # Optional arguments
     parser.add_argument(
-        "--max-pages", type=int, default=1, help="Maximum pages to scrape (up to 1000)"
+        "--max-pages",
+        type=int,
+        default=0,
+        help="Maximum pages to scrape (default: 0 for all pages, up to 1000)",
     )
     parser.add_argument(
         "--proxy-provider",
@@ -505,8 +508,11 @@ def run_enhanced_scraper(args: argparse.Namespace) -> None:
         if args.max_pages > 1000:
             logger.error("Page limit exceeded", "Maximum pages limit is 1000")
             sys.exit(1)
-        if args.max_pages <= 0:
-            logger.error("Invalid page count", "max-pages must be a positive number")
+        if args.max_pages < 0:
+            logger.error(
+                "Invalid page count",
+                "max-pages must be 0 (for all pages) or a positive number",
+            )
             sys.exit(1)
 
         # Import and run EnhancedAliExpressScraper directly (module's __main__ main isn't exported)
