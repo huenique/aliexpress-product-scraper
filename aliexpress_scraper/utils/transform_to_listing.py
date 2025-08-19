@@ -191,14 +191,15 @@ def main():
     )
     parser.add_argument("input_file", help="Input file path (CSV or JSON)")
     parser.add_argument(
-        "-o", "--output", help="Output file path (default: auto-generated)"
+        "-o",
+        "--output",
+        help="Output file path (default: auto-generated). Format is auto-detected from extension.",
     )
     parser.add_argument(
         "-f",
         "--format",
         choices=["csv", "json"],
-        default="csv",
-        help="Output format (default: csv)",
+        help="Output format (default: auto-detect from output file extension, fallback to csv)",
     )
 
     args = parser.parse_args()
@@ -208,6 +209,26 @@ def main():
     if not input_path.exists():
         print(f"Error: Input file '{input_path}' does not exist.")
         return
+
+    # Determine output format
+    output_format = "csv"  # default fallback
+
+    if args.output:
+        # Auto-detect format from output file extension
+        output_ext = Path(args.output).suffix.lower()
+        if output_ext == ".json":
+            output_format = "json"
+        elif output_ext == ".csv":
+            output_format = "csv"
+        elif args.format:
+            # Use explicit format if extension is not recognized
+            output_format = args.format
+        else:
+            # Default to csv if no extension and no format specified
+            output_format = "csv"
+    elif args.format:
+        # Use explicit format when no output file specified
+        output_format = args.format
 
     # Determine input format from file extension
     if input_path.suffix.lower() == ".json":
@@ -232,10 +253,10 @@ def main():
     if args.output:
         output_path = args.output
     else:
-        output_path = input_path.stem + f"_listing_format.{args.format}"
+        output_path = input_path.stem + f"_listing_format.{output_format}"
 
     # Write output
-    if args.format == "json":
+    if output_format == "json":
         write_to_json(transformed_data, output_path)
     else:
         write_to_csv(transformed_data, output_path)
@@ -245,7 +266,7 @@ def main():
     # Print summary
     print("\n--- Transformation Summary ---")
     print(f"Input format: {input_path.suffix.upper()}")
-    print(f"Output format: {args.format.upper()}")
+    print(f"Output format: {output_format.upper()}")
     print(f"Records processed: {len(transformed_data)}")
     print("\nField mappings applied:")
     print("- listing_uuid: Generated UUID")

@@ -409,14 +409,13 @@ def create_transform_parser(subparsers: Any) -> None:
     parser.add_argument(
         "-o",
         "--output",
-        help="Path to output file (optional, auto-generated if not specified)",
+        help="Path to output file (format auto-detected from extension)",
     )
     parser.add_argument(
         "-f",
         "--format",
         choices=["csv", "json"],
-        default="csv",
-        help="Output format (default: csv)",
+        help="Output format override (auto-detected from file extension if not specified)",
     )
 
     parser.set_defaults(func=run_transform)
