@@ -404,17 +404,19 @@ def create_transform_parser(subparsers: Any) -> None:
     )
 
     parser.add_argument(
-        "input_file", help="Path to input JSON file with AliExpress data"
+        "input_file", help="Path to input JSON or CSV file with AliExpress data"
     )
     parser.add_argument(
-        "output_file", nargs="?", help="Path to output CSV file (optional)"
+        "-o",
+        "--output",
+        help="Path to output file (optional, auto-generated if not specified)",
     )
     parser.add_argument(
-        "--source", default="aliexpress", help="Source identifier (default: aliexpress)"
-    )
-    parser.add_argument("--category", help="Product category to assign to all listings")
-    parser.add_argument(
-        "--tags", nargs="*", help="Additional tags to apply to listings"
+        "-f",
+        "--format",
+        choices=["csv", "json"],
+        default="csv",
+        help="Output format (default: csv)",
     )
 
     parser.set_defaults(func=run_transform)
@@ -703,15 +705,12 @@ def run_transform(args: argparse.Namespace) -> None:
         # Import from the utils module
         from aliexpress_scraper.utils.transform_to_listing import main as transform_main
 
-        # Convert args to sys.argv format
+        # Convert args to sys.argv format that matches transform_to_listing.py expectations
         sys.argv = ["transform_to_listing.py", args.input_file]
-        if args.output_file:
-            sys.argv.append(args.output_file)
-        sys.argv.extend(["--source", args.source])
-        if args.category:
-            sys.argv.extend(["--category", args.category])
-        if args.tags:
-            sys.argv.extend(["--tags"] + args.tags)
+        if hasattr(args, "output") and args.output:
+            sys.argv.extend(["-o", args.output])
+        if hasattr(args, "format") and args.format:
+            sys.argv.extend(["-f", args.format])
 
         logger.start("Data transformation", f"input: {args.input_file}")
 
@@ -1091,7 +1090,7 @@ Examples:
   %(prog)s scrape multi --queries-dir queries/instyler.txt --brand "InStyler" --scraper-type basic
 
   # Transform data to listing format
-  %(prog)s transform aliexpress_data.json listings.csv --category "Electronics"
+  %(prog)s transform aliexpress_data.json -o listings.csv -f csv
 
   # Retry missing store information
   %(prog)s store-retry aliexpress_data.json --batch-size 10 --proxy-provider oxylabs
