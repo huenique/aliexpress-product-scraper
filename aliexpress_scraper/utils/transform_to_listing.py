@@ -66,7 +66,7 @@ def transform_aliexpress_to_listing(
     - product_uuid: null (not available in AliExpress data)
     - product_title: Title
     - product_image_urls: [Image URL] (converted to JSON array)
-    - sku: null (not available)
+    - sku: Product ID (AliExpress product identifier)
     - asin: null (Amazon-specific)
     - item_number: Product ID
     - price: Sale Price (parsed to float)
@@ -110,7 +110,7 @@ def transform_aliexpress_to_listing(
             "product_uuid": None,  # Not available in AliExpress data
             "product_title": item.get("Title", ""),
             "product_image_urls": create_image_urls_array(item.get("Image URL", "")),
-            "sku": None,  # Not available
+            "sku": item.get("Product ID", ""),  # Using Product ID as SKU
             "asin": None,  # Amazon-specific
             "item_number": item.get("Product ID", ""),
             "price": parse_price(item.get("Sale Price", "")),
@@ -272,6 +272,7 @@ def main():
     print("- listing_uuid: Generated UUID")
     print("- product_uuid: null (not available)")
     print("- product_title: Title")
+    print("- sku: Product ID (AliExpress product identifier)")
     print("- item_number: Product ID")
     print("- price: Sale Price (parsed)")
     print("- units_sold: Orders Count")
