@@ -1,0 +1,3 @@
+[submodule "csv-schema-validator"]
+	path = csv-schema-validator
+	url = https://github.com/huenique/csv-schema-validator.git
